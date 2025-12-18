@@ -9,8 +9,8 @@ from io import BytesIO
 import time
 
 # 設定網頁標題
-st.set_page_config(page_title="雲端相簿 Pro (完整版)", layout="wide")
-st.title("☁️ 雲端相簿 Pro (手機優化+完整篩選)")
+st.set_page_config(page_title="雲端圖庫 (插畫專用版)", layout="wide")
+st.title("☁️ 雲端圖庫 (插畫管理版)")
 
 # --- 1. Cloudinary 連線設定 ---
 if "cloudinary" in st.secrets:
@@ -94,20 +94,25 @@ if 'gallery' not in st.session_state:
 existing_albums = sorted(list(set([item['album'] for item in st.session_state.gallery])))
 if "未分類" not in existing_albums: existing_albums.append("未分類")
 
+# 自動抓取資料庫中已經用過的標籤
 existing_tags = sorted(list(set([tag for item in st.session_state.gallery for tag in item['tags']])))
-DEFAULT_TAGS = ["人像", "風景", "美食", "工作", "回憶"]
+
+# [修改處] 更新預設標籤為您的需求
+DEFAULT_TAGS = ["彩色", "線稿", "單人", "雙人"]
+
+# 合併標籤：確保舊照片上的標籤 (如: 風景) 不會消失，同時加入新的預設標籤
 ALL_TAG_OPTIONS = sorted(list(set(DEFAULT_TAGS + existing_tags)))
 
 # === 側邊欄：上傳 ===
 with st.sidebar:
-    st.header("📂 上傳照片")
+    st.header("📂 上傳作品")
     album_mode = st.radio("模式", ["選擇現有相簿", "建立新相簿"])
     if album_mode == "建立新相簿":
         current_album = st.text_input("輸入新相簿名稱")
     else:
         current_album = st.selectbox("選擇上傳相簿", existing_albums)
 
-    uploaded_files = st.file_uploader("選擇照片 (可多選)", type=['jpg', 'png', 'jpeg'], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("選擇圖片 (可多選)", type=['jpg', 'png', 'jpeg'], accept_multiple_files=True)
     
     if uploaded_files and st.button("確認上傳", type="primary"):
         if not current_album: st.error("請輸入相簿名稱")
@@ -134,15 +139,16 @@ with st.sidebar:
 # 1. 篩選與排序工具列
 st.subheader("🔍 瀏覽設定")
 
-# 第一排：相簿 + 標籤 (保持不變)
+# 第一排：相簿 + 標籤
 f_c1, f_c2 = st.columns([1, 2])
 with f_c1:
     filter_album = st.selectbox("📂 相簿", ["全部"] + existing_albums)
 with f_c2:
+    # 這裡會顯示新的標籤選項
     filter_tags = st.multiselect("🏷️ 標籤篩選 (同時符合)", existing_tags)
 
-# 第二排：排序 + 年份 + 月份 (這裡把月份加回來了！)
-f_c3, f_c4, f_c5 = st.columns([2, 1, 1]) # 比例設為 2:1:1 讓排序寬一點
+# 第二排：排序 + 年份 + 月份
+f_c3, f_c4, f_c5 = st.columns([2, 1, 1]) 
 
 with f_c3:
     sort_option = st.selectbox(
@@ -156,7 +162,6 @@ with f_c4:
     filter_year = st.selectbox("📅 年份", ["全部"] + all_years)
 
 with f_c5:
-    # 補回月份篩選
     all_months = list(range(1, 13))
     filter_month = st.selectbox("🌙 月份", ["全部"] + all_months)
 
@@ -165,7 +170,6 @@ filtered_photos = []
 for p in st.session_state.gallery:
     match_album = (filter_album == "全部") or (p['album'] == filter_album)
     match_year = (filter_year == "全部") or (p['date'].year == filter_year)
-    # 補回月份邏輯
     match_month = (filter_month == "全部") or (p['date'].month == filter_month)
     
     match_tags = True
@@ -175,7 +179,7 @@ for p in st.session_state.gallery:
     if match_album and match_year and match_month and match_tags:
         filtered_photos.append(p)
 
-# 執行排序邏輯
+# 執行排序
 if sort_option == "日期 (舊→新)":
     filtered_photos.sort(key=lambda x: x['date']) 
 elif sort_option == "日期 (新→舊)":
@@ -204,7 +208,7 @@ with ctrl_c2:
         for p in filtered_photos: st.session_state[f"sel_{p['public_id']}"] = False
         st.rerun()
 
-# 3. 照片展示區 (受 CSS 影響，手機版會並排)
+# 3. 照片展示區
 selected_photos = [] 
 
 if filtered_photos:
@@ -237,6 +241,7 @@ if selected_photos:
     
     act_c1, act_c2 = st.columns(2)
     with act_c1:
+        # [修改處] 這裡的選項會使用新的標籤清單
         new_tags = st.multiselect("批次設定標籤", ALL_TAG_OPTIONS)
         if st.button("更新標籤"):
             for p in selected_photos:
