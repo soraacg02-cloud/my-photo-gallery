@@ -1,132 +1,242 @@
 import streamlit as st
-import os
-import shutil
-from datetime import datetime
-import pandas as pd
+import datetime
+import json
+import requests
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
+from io import BytesIO
+import time
 
-# 設定基礎路徑 (所有的相簿都會放在這個 albums 資料夾下)
-BASE_DIR = "albums"
+# 設定網頁標題
+st.set_page_config(page_title="雲端相簿 Pro+", layout="wide")
+st.title("☁️ 雲端相簿 Pro+ (相簿管理版)")
 
-# 確保基礎資料夾存在
-if not os.path.exists(BASE_DIR):
-    os.makedirs(BASE_DIR)
+# --- 1. Cloudinary 連線設定 ---
+# 請確保 .streamlit/secrets.toml 設定正確
+if "cloudinary" in st.secrets:
+    cloudinary.config(
+        cloud_name = st.secrets["cloudinary"]["cloud_name"],
+        api_key = st.secrets["cloudinary"]["api_key"],
+        api_secret = st.secrets["cloudinary"]["api_secret"],
+        secure = True
+    )
 
-st.title("📸 雲端智慧相簿管理系統")
+DB_FILENAME = "photo_db_v2.json" # 升級檔名以區隔舊版
 
-# --- 側邊欄：相簿管理 ---
-st.sidebar.header("📁 相簿管理")
+# --- 2. 核心功能函數 ---
 
-# 1. 建立新相簿
-new_album = st.sidebar.text_input("建立新相簿名稱")
-if st.sidebar.button("新增相簿"):
-    if new_album:
-        album_path = os.path.join(BASE_DIR, new_album)
-        if not os.path.exists(album_path):
-            os.makedirs(album_path)
-            st.sidebar.success(f"相簿 '{new_album}' 已建立！")
+def load_db():
+    """從雲端下載資料庫"""
+    try:
+        url, options = cloudinary.utils.cloudinary_url(DB_FILENAME, resource_type="raw")
+        no_cache_url = f"{url}?t={time.time()}"
+        response = requests.get(no_cache_url)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # 資料轉換與修復 (確保舊資料有 album 欄位)
+            for item in data:
+                item['date'] = datetime.datetime.strptime(item['date_str'], "%Y-%m-%d").date()
+                if 'album' not in item:
+                    item['album'] = "未分類" # 舊資料預設歸類
+            return data
         else:
-            st.sidebar.warning("該相簿已存在。")
+            return []
+    except Exception as e:
+        return []
 
-# 2. 選擇相簿
-albums_list = [d for d in os.listdir(BASE_DIR) if os.path.isdir(os.path.join(BASE_DIR, d))]
-selected_album = st.sidebar.selectbox("選擇相簿", albums_list)
-
-if selected_album:
-    album_path = os.path.join(BASE_DIR, selected_album)
+def save_db(data):
+    """把資料庫存回雲端"""
+    save_list = []
+    for item in data:
+        save_list.append({
+            "public_id": item['public_id'],
+            "url": item['url'],
+            "name": item['name'],
+            "date_str": item['date'].strftime("%Y-%m-%d"),
+            "tags": item['tags'],
+            "album": item.get('album', '未分類') # 新增儲存相簿欄位
+        })
     
-    # --- 上傳照片區域 ---
-    st.subheader(f"📂 目前相簿：{selected_album}")
-    uploaded_files = st.file_uploader("上傳照片 (支援多選)", type=['jpg', 'png', 'jpeg'], accept_multiple_files=True)
+    json_str = json.dumps(save_list, ensure_ascii=False, indent=4)
+    cloudinary.uploader.upload(
+        BytesIO(json_str.encode('utf-8')), 
+        public_id=DB_FILENAME, 
+        resource_type="raw", 
+        overwrite=True,
+        invalidate=True 
+    )
+
+def delete_image_from_cloud(public_id):
+    """刪除雲端圖片"""
+    cloudinary.uploader.destroy(public_id)
+
+# --- 3. 應用程式主邏輯 ---
+
+# 初始化 Session State
+if 'gallery' not in st.session_state:
+    with st.spinner('正在連線到雲端資料庫...'):
+        st.session_state.gallery = load_db()
+
+# 取得所有現有的相簿名稱
+existing_albums = sorted(list(set([item['album'] for item in st.session_state.gallery])))
+if "未分類" not in existing_albums:
+    existing_albums.append("未分類")
+
+TAG_OPTIONS = ["人像", "風景", "美食", "工作", "回憶"]
+
+# === 側邊欄：相簿與上傳區 ===
+with st.sidebar:
+    st.header("📂 1. 選擇或建立相簿")
     
-    if uploaded_files:
-        for uploaded_file in uploaded_files:
-            file_path = os.path.join(album_path, uploaded_file.name)
-            with open(file_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-        st.success(f"成功上傳 {len(uploaded_files)} 張照片！")
-
-    # --- 讀取照片與日期處理 ---
-    # 讀取該相簿下所有檔案
-    files = [f for f in os.listdir(album_path) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+    # 讓使用者選擇現有相簿或輸入新名稱
+    album_mode = st.radio("模式", ["選擇現有相簿", "建立新相簿"])
     
-    if files:
-        # 建立一個資料表來管理照片資訊
-        data = []
-        for f in files:
-            file_full_path = os.path.join(album_path, f)
-            # 獲取檔案修改時間 (模擬拍攝時間)
-            timestamp = os.path.getmtime(file_full_path)
-            dt = datetime.fromtimestamp(timestamp)
-            data.append({
-                "Filename": f,
-                "Path": file_full_path,
-                "Year": dt.year,
-                "Month": dt.month
-            })
-        
-        df = pd.DataFrame(data)
-
-        # --- 篩選器 (Filter) ---
-        st.divider()
-        st.subheader("🔍 篩選照片")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # 抓出所有的年份選項
-            all_years = sorted(df['Year'].unique())
-            selected_years = st.multiselect("選擇年份", all_years, default=all_years)
-        
-        with col2:
-            # 抓出所有的月份選項
-            all_months = sorted(df['Month'].unique())
-            selected_months = st.multiselect("選擇月份", all_months, default=all_months)
-
-        # 根據使用者選擇進行資料篩選
-        filtered_df = df[
-            (df['Year'].isin(selected_years)) & 
-            (df['Month'].isin(selected_months))
-        ]
-
-        # --- 批次管理區域 ---
-        st.divider()
-        st.subheader("🛠️ 批次管理 (修改標籤/刪除)")
-        
-        # 讓使用者勾選要處理的照片
-        selected_files_to_edit = st.multiselect(
-            "選擇要操作的照片：", 
-            filtered_df['Filename'].tolist()
-        )
-
-        # 展示選中的照片預覽
-        if selected_files_to_edit:
-            st.write("已選取照片預覽：")
-            cols = st.columns(len(selected_files_to_edit)) if len(selected_files_to_edit) < 4 else st.columns(4)
-            for idx, file_name in enumerate(selected_files_to_edit):
-                img_path = os.path.join(album_path, file_name)
-                # 使用簡單的數學運算來分配圖片到欄位中
-                cols[idx % 4].image(img_path, caption=file_name, use_container_width=True)
-
-            # 操作按鈕
-            col_action1, col_action2 = st.columns(2)
-            
-            with col_action1:
-                # 批次新增標籤 (這裡演示邏輯，實際儲存需要資料庫)
-                new_tag = st.text_input("輸入新標籤")
-                if st.button("批次更新標籤"):
-                    st.toast(f"已為 {len(selected_files_to_edit)} 張照片添加標籤：{new_tag}")
-                    st.info("💡 提示：在真實系統中，這裡會將標籤寫入資料庫或 CSV 檔。")
-
-            with col_action2:
-                # 批次刪除
-                if st.button("🗑️ 批次刪除照片", type="primary"):
-                    for file_name in selected_files_to_edit:
-                        os.remove(os.path.join(album_path, file_name))
-                    st.success("照片已刪除！請手動重新整理頁面。")
-                    
-        else:
-            st.info("請從上方清單選擇照片以進行批次操作。")
-
+    if album_mode == "建立新相簿":
+        current_album = st.text_input("輸入新相簿名稱")
     else:
-        st.write("此相簿目前沒有照片，請先上傳。")
+        current_album = st.selectbox("選擇相簿", existing_albums)
+
+    st.divider()
+    st.header("📤 2. 上傳照片")
+    st.info(f"即將上傳至：**{current_album}**")
+    
+    uploaded_files = st.file_uploader("選擇照片...", type=['jpg', 'png', 'jpeg'], accept_multiple_files=True)
+    
+    if uploaded_files and st.button("確認上傳", type="primary"):
+        if not current_album:
+            st.error("請先輸入或選擇相簿名稱！")
+        else:
+            progress_bar = st.progress(0)
+            for i, uploaded_file in enumerate(uploaded_files):
+                try:
+                    # A. 上傳
+                    res = cloudinary.uploader.upload(uploaded_file)
+                    pid, url = res['public_id'], res['secure_url']
+                    
+                    # B. 處理日期
+                    fname = uploaded_file.name
+                    try:
+                        date_str = fname[:8] # 嘗試從檔名抓日期 ex: 20231201.jpg
+                        img_date = datetime.datetime.strptime(date_str, "%Y%m%d").date()
+                    except:
+                        img_date = datetime.date.today()
+                    
+                    # C. 加入資料庫 (包含 album)
+                    st.session_state.gallery.append({
+                        "public_id": pid,
+                        "url": url,
+                        "name": fname,
+                        "date": img_date,
+                        "tags": [],
+                        "album": current_album 
+                    })
+                except Exception as e:
+                    st.error(f"上傳失敗: {e}")
+                
+                progress_bar.progress((i + 1) / len(uploaded_files))
+            
+            # D. 存檔
+            save_db(st.session_state.gallery)
+            st.success("上傳完成！")
+            time.sleep(1)
+            st.rerun()
+
+# === 主畫面：瀏覽與管理 ===
+
+# 1. 頂部篩選區 (Filter)
+st.subheader("🔍 篩選與檢視")
+col_f1, col_f2, col_f3 = st.columns(3)
+
+with col_f1:
+    filter_album = st.selectbox("相簿分類", ["全部"] + existing_albums)
+
+# 準備年份與月份資料
+all_years = sorted(list(set([d['date'].year for d in st.session_state.gallery])), reverse=True)
+all_months = list(range(1, 13))
+
+with col_f2:
+    filter_year = st.selectbox("年份", ["全部"] + all_years)
+
+with col_f3:
+    filter_month = st.selectbox("月份", ["全部"] + all_months)
+
+# 執行篩選邏輯
+filtered_gallery = []
+for photo in st.session_state.gallery:
+    # 相簿篩選
+    match_album = (filter_album == "全部") or (photo['album'] == filter_album)
+    # 年份篩選
+    match_year = (filter_year == "全部") or (photo['date'].year == filter_year)
+    # 月份篩選
+    match_month = (filter_month == "全部") or (photo['date'].month == filter_month)
+    
+    if match_album and match_year and match_month:
+        filtered_gallery.append(photo)
+
+st.caption(f"共找到 {len(filtered_gallery)} 張照片")
+
+# 2. 批次處理區 (Batch Actions)
+st.divider()
+st.subheader("🛠️ 批次管理")
+
+if filtered_gallery:
+    # 產生多選單，讓使用者選擇要處理的照片
+    # 使用 format_func 讓選項顯示 "檔名 (相簿)"
+    selected_photos = st.multiselect(
+        "勾選要 **修改標籤** 或 **刪除** 的照片：",
+        filtered_gallery,
+        format_func=lambda x: f"{x['name']} ({x['album']})"
+    )
+
+    if selected_photos:
+        b_col1, b_col2 = st.columns(2)
+        
+        # 批次修改標籤
+        with b_col1:
+            st.write("Tag 設定")
+            batch_tags = st.multiselect("設定新標籤", TAG_OPTIONS)
+            if st.button("套用標籤到選取照片"):
+                for p in selected_photos:
+                    # 找到原始資料並更新 (避免只更新到篩選後的副本)
+                    for origin_p in st.session_state.gallery:
+                        if origin_p['public_id'] == p['public_id']:
+                            origin_p['tags'] = batch_tags
+                save_db(st.session_state.gallery)
+                st.success("標籤已批次更新！")
+                time.sleep(1)
+                st.rerun()
+
+        # 批次刪除
+        with b_col2:
+            st.write("危險操作")
+            if st.button("🗑️ 刪除選取的照片", type="primary"):
+                progress = st.progress(0)
+                for idx, p in enumerate(selected_photos):
+                    # 1. 刪除雲端圖檔
+                    delete_image_from_cloud(p['public_id'])
+                    # 2. 從記憶體移除
+                    st.session_state.gallery = [x for x in st.session_state.gallery if x['public_id'] != p['public_id']]
+                    progress.progress((idx + 1) / len(selected_photos))
+                
+                # 3. 存檔更新 JSON
+                save_db(st.session_state.gallery)
+                st.success("照片已批次刪除！")
+                time.sleep(1)
+                st.rerun()
+
+# 3. 照片展示區 (Gallery)
+st.divider()
+if filtered_gallery:
+    # 簡單的 Grid 排版
+    cols = st.columns(4)
+    for idx, photo in enumerate(filtered_gallery):
+        with cols[idx % 4]:
+            st.image(photo['url'], use_container_width=True)
+            st.caption(f"📁 {photo['album']}")
+            st.caption(f"📅 {photo['date']}")
+            if photo['tags']:
+                st.write(f"🏷️ {','.join(photo['tags'])}")
 else:
-    st.info("請從左側側邊欄建立或選擇一個相簿。")
+    st.info("沒有符合條件的照片。")
