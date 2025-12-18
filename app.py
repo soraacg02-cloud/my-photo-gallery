@@ -9,8 +9,8 @@ from io import BytesIO
 import time
 
 # 設定網頁標題
-st.set_page_config(page_title="雲端相簿 Pro (手機修復版)", layout="wide")
-st.title("☁️ 雲端相簿 Pro (排序與手機優化)")
+st.set_page_config(page_title="雲端相簿 Pro (完整版)", layout="wide")
+st.title("☁️ 雲端相簿 Pro (手機優化+完整篩選)")
 
 # --- 1. Cloudinary 連線設定 ---
 if "cloudinary" in st.secrets:
@@ -32,24 +32,17 @@ def inject_custom_css():
         background-color: #ff4b4b !important;
     }
     
-    /* 2. 手機版強制網格 (Mobile Grid Fix) 
-       我們針對螢幕寬度小於 640px 的裝置
-    */
+    /* 2. 手機版強制網格 (Mobile Grid Fix) */
     @media (max-width: 640px) {
-        /* 針對 Streamlit 的列 (Column) 進行強制縮減 */
         [data-testid="column"] {
             width: 50% !important;
             flex: 1 1 50% !important;
             min-width: 50% !important;
         }
-        
-        /* 修正圖片在窄欄位中的顯示 */
         [data-testid="column"] img {
             max-width: 100% !important;
             height: auto !important;
         }
-        
-        /* 讓按鈕在手機上也比較好按，稍微縮小一點 margin */
         .stButton button {
             width: 100%;
             padding: 0.25rem 0.5rem;
@@ -141,44 +134,49 @@ with st.sidebar:
 # 1. 篩選與排序工具列
 st.subheader("🔍 瀏覽設定")
 
-# 第一排：相簿 + 標籤
+# 第一排：相簿 + 標籤 (保持不變)
 f_c1, f_c2 = st.columns([1, 2])
 with f_c1:
     filter_album = st.selectbox("📂 相簿", ["全部"] + existing_albums)
 with f_c2:
     filter_tags = st.multiselect("🏷️ 標籤篩選 (同時符合)", existing_tags)
 
-# 第二排：排序 + 年份
-f_c3, f_c4 = st.columns(2)
+# 第二排：排序 + 年份 + 月份 (這裡把月份加回來了！)
+f_c3, f_c4, f_c5 = st.columns([2, 1, 1]) # 比例設為 2:1:1 讓排序寬一點
+
 with f_c3:
-    # [需求 2 & 3] 排序功能
-    # 設定預設順序：日期 (舊→新)
     sort_option = st.selectbox(
         "🔃 排序方式", 
         ["日期 (舊→新)", "日期 (新→舊)", "檔名 (A→Z)", "檔名 (Z→A)", "標籤 (A→Z)"],
-        index=0 # 預設選第一個
+        index=0 
     )
 
 with f_c4:
     all_years = sorted(list(set([p['date'].year for p in st.session_state.gallery])), reverse=True)
     filter_year = st.selectbox("📅 年份", ["全部"] + all_years)
 
+with f_c5:
+    # 補回月份篩選
+    all_months = list(range(1, 13))
+    filter_month = st.selectbox("🌙 月份", ["全部"] + all_months)
+
 # 執行篩選
 filtered_photos = []
 for p in st.session_state.gallery:
     match_album = (filter_album == "全部") or (p['album'] == filter_album)
     match_year = (filter_year == "全部") or (p['date'].year == filter_year)
+    # 補回月份邏輯
+    match_month = (filter_month == "全部") or (p['date'].month == filter_month)
     
     match_tags = True
     if filter_tags:
         match_tags = all(tag in p['tags'] for tag in filter_tags)
     
-    if match_album and match_year and match_tags:
+    if match_album and match_year and match_month and match_tags:
         filtered_photos.append(p)
 
-# [需求 2 & 3] 執行排序邏輯
+# 執行排序邏輯
 if sort_option == "日期 (舊→新)":
-    # 使用 Python 的 sort, key 指定要比對的欄位
     filtered_photos.sort(key=lambda x: x['date']) 
 elif sort_option == "日期 (新→舊)":
     filtered_photos.sort(key=lambda x: x['date'], reverse=True)
@@ -187,7 +185,6 @@ elif sort_option == "檔名 (A→Z)":
 elif sort_option == "檔名 (Z→A)":
     filtered_photos.sort(key=lambda x: x['name'], reverse=True)
 elif sort_option == "標籤 (A→Z)":
-    # 如果沒標籤就排最後，有的話取第一個標籤來排序
     filtered_photos.sort(key=lambda x: x['tags'][0] if x['tags'] else "zzzz")
 
 st.divider()
@@ -207,11 +204,10 @@ with ctrl_c2:
         for p in filtered_photos: st.session_state[f"sel_{p['public_id']}"] = False
         st.rerun()
 
-# 3. 照片展示區
+# 3. 照片展示區 (受 CSS 影響，手機版會並排)
 selected_photos = [] 
 
 if filtered_photos:
-    # 這裡會受到上方 CSS 影響，手機版會強制變成 2 欄
     cols = st.columns(num_columns)
     
     for idx, photo in enumerate(filtered_photos):
@@ -229,7 +225,7 @@ if filtered_photos:
             if num_columns == 1:
                  st.text(f"相簿: {photo['album']} | 日期: {photo['date']}")
             
-            st.write("") # 間距
+            st.write("") 
             
             if is_selected:
                 selected_photos.append(photo)
