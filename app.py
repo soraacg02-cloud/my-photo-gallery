@@ -2,184 +2,184 @@ import streamlit as st
 from PIL import Image
 import datetime
 import json
-import io
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
+import requests
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
+from io import BytesIO
 
-# 設定頁面
-st.set_page_config(page_title="雲端相簿 Pro (Google Drive版)", layout="wide")
-st.title("☁️ 雲端相簿 Pro (Google Drive 連動)")
+# 設定網頁標題
+st.set_page_config(page_title="雲端相簿 (永久免費版)", layout="wide")
+st.title("☁️ 雲端相簿 Pro (Cloudinary 加速版)")
 
-# --- Google Drive 連線設定 ---
-# 這是 Drive API 權限範圍
-SCOPES = ['https://www.googleapis.com/auth/drive']
-FOLDER_ID = st.secrets["gdrive_folder_id"]
+# --- 1. Cloudinary 連線設定 ---
+# 程式會自動去 Secrets 抓取您設定好的帳號密碼
+cloudinary.config(
+    cloud_name = st.secrets["cloudinary"]["cloud_name"],
+    api_key = st.secrets["cloudinary"]["api_key"],
+    api_secret = st.secrets["cloudinary"]["api_secret"],
+    secure = True
+)
+
+# 資料庫檔案名稱
 DB_FILENAME = "photo_db.json"
 
-@st.cache_resource
-def get_drive_service():
-    """連線到 Google Drive"""
-    creds = service_account.Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"], scopes=SCOPES)
-    return build('drive', 'v3', credentials=creds)
+# --- 2. 核心功能函數 ---
 
-def get_file_id_by_name(service, filename):
-    """查詢檔案是否存在於指定資料夾，回傳 ID"""
-    query = f"name = '{filename}' and '{FOLDER_ID}' in parents and trashed = false"
-    results = service.files().list(q=query, fields="files(id, name)").execute()
-    files = results.get('files', [])
-    return files[0]['id'] if files else None
-
-def download_db(service):
-    """從 Drive 下載資料庫 JSON"""
-    file_id = get_file_id_by_name(service, DB_FILENAME)
-    if file_id:
-        request = service.files().get_media(fileId=file_id)
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while done is False:
-            status, done = downloader.next_chunk()
-        fh.seek(0)
-        return json.load(fh)
-    return [] # 如果沒檔案，回傳空清單
-
-def upload_db(service, data):
-    """將資料庫 JSON 上傳回 Drive (覆蓋)"""
-    # 將 list 轉為 json 字串
-    json_str = json.dumps(data, ensure_ascii=False, indent=4)
-    fh = io.BytesIO(json_str.encode('utf-8'))
-    
-    file_id = get_file_id_by_name(service, DB_FILENAME)
-    media = MediaIoBaseUpload(fh, mimetype='application/json')
-    
-    if file_id:
-        # 更新現有檔案
-        service.files().update(fileId=file_id, media_body=media).execute()
-    else:
-        # 建立新檔案
-        file_metadata = {'name': DB_FILENAME, 'parents': [FOLDER_ID]}
-        service.files().create(body=file_metadata, media_body=media).execute()
-
-def upload_image_to_drive(service, file_obj, filename):
-    """上傳圖片到 Drive"""
-    media = MediaIoBaseUpload(file_obj, mimetype=file_obj.type)
-    file_metadata = {'name': filename, 'parents': [FOLDER_ID]}
-    file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-    return file.get('id')
-
-# --- 應用程式邏輯 ---
-
-# 1. 取得連線
-try:
-    drive_service = get_drive_service()
-    # 2. 讀取資料庫 (只在第一次加載或強制重整時)
-    if 'gallery' not in st.session_state:
-        with st.spinner('正在從 Google Drive 下載資料庫...'):
-            raw_data = download_db(drive_service)
-            # 轉換日期格式
-            for item in raw_data:
+def load_db():
+    """從雲端下載資料庫 (JSON檔)"""
+    try:
+        # 產生檔案的下載連結
+        url, options = cloudinary.utils.cloudinary_url(DB_FILENAME, resource_type="raw")
+        # 下載內容
+        response = requests.get(url)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # 把文字日轉回日期物件，方便程式處理
+            for item in data:
                 item['date'] = datetime.datetime.strptime(item['date_str'], "%Y-%m-%d").date()
-            st.session_state.gallery = raw_data
-except Exception as e:
-    st.error(f"連線失敗，請檢查 Secrets 設定: {e}")
-    st.stop()
+            return data
+        else:
+            return [] # 如果是第一次使用，檔案還不存在，回傳空清單
+    except Exception:
+        return []
 
-TAG_OPTIONS = ["線搞", "上色", "單人", "雙人"]
+def save_db(data):
+    """把資料庫存回雲端"""
+    # 轉換資料格式 (因為 JSON 不能直接存日期物件)
+    save_list = []
+    for item in data:
+        save_list.append({
+            "public_id": item['public_id'],
+            "url": item['url'],
+            "name": item['name'],
+            "date_str": item['date'].strftime("%Y-%m-%d"),
+            "tags": item['tags']
+        })
+    
+    # 轉成文字
+    json_str = json.dumps(save_list, ensure_ascii=False, indent=4)
+    
+    # 上傳覆蓋舊檔 (resource_type="raw" 代表它是純檔案，不是圖片)
+    cloudinary.uploader.upload(
+        BytesIO(json_str.encode('utf-8')), 
+        public_id=DB_FILENAME, 
+        resource_type="raw", 
+        overwrite=True
+    )
 
-# --- 側邊欄 ---
+def upload_image(file_obj):
+    """上傳圖片到 Cloudinary"""
+    # 這行指令會自動把圖片傳上去，並回傳圖片的資訊
+    response = cloudinary.uploader.upload(file_obj)
+    return response['public_id'], response['secure_url']
+
+def delete_image(public_id):
+    """從雲端刪除圖片"""
+    cloudinary.uploader.destroy(public_id)
+
+# --- 3. 應用程式主邏輯 ---
+
+# 初始化：如果記憶體是空的，就去雲端載入資料
+if 'gallery' not in st.session_state:
+    with st.spinner('正在連線到雲端資料庫...'):
+        st.session_state.gallery = load_db()
+
+TAG_OPTIONS = ["線搞", "上色", "單人", "雙人", "背景"]
+
+# === 側邊欄：上傳區 ===
 with st.sidebar:
-    st.header("📸 上傳至 Google Drive")
-    uploaded_files = st.file_uploader("選擇照片...", type=['jpg', 'png'], accept_multiple_files=True)
+    st.header("📤 上傳照片")
+    uploaded_files = st.file_uploader("選擇照片...", type=['jpg', 'png', 'jpeg'], accept_multiple_files=True)
     
     if uploaded_files and st.button("確認上傳"):
         progress_bar = st.progress(0)
+        
         for i, uploaded_file in enumerate(uploaded_files):
-            # 處理日期
             fname = uploaded_file.name
+            
             try:
-                date_str = fname[:8]
-                img_date = datetime.datetime.strptime(date_str, "%Y%m%d").date()
-            except:
-                img_date = datetime.date.today()
+                # A. 上傳圖片
+                pid, url = upload_image(uploaded_file)
+                
+                # B. 自動抓取日期
+                try:
+                    date_str = fname[:8]
+                    img_date = datetime.datetime.strptime(date_str, "%Y%m%d").date()
+                except:
+                    img_date = datetime.date.today()
+                
+                # C. 記錄到記憶體
+                st.session_state.gallery.append({
+                    "public_id": pid, # Cloudinary 的身分證 ID
+                    "url": url,       # 圖片網址 (速度很快)
+                    "name": fname,
+                    "date": img_date,
+                    "tags": []
+                })
+            except Exception as e:
+                st.error(f"上傳失敗: {e}")
             
-            # 上傳圖片實體
-            img_id = upload_image_to_drive(drive_service, uploaded_file, fname)
-            
-            # 更新資料庫紀錄 (只存 ID 和 資訊，不存圖片本體)
-            new_record = {
-                "id": img_id, # Drive 檔案 ID
-                "name": fname,
-                "date": img_date,
-                "tags": [],
-                "date_str": img_date.strftime("%Y-%m-%d") # 方便存檔
-            }
-            st.session_state.gallery.append(new_record)
             progress_bar.progress((i + 1) / len(uploaded_files))
-        
-        # 全部上傳完後，同步更新 DB 檔案
-        save_list = []
-        for item in st.session_state.gallery:
-            # 準備要存檔的純文字資料
-            save_list.append({
-                "id": item['id'],
-                "name": item['name'],
-                "date_str": item['date'].strftime("%Y-%m-%d"),
-                "tags": item['tags']
-            })
-        upload_db(drive_service, save_list)
-        
-        st.success("上傳完成！圖片已安全存入 Google Drive。")
+            
+        # D. 全部傳完後，立刻存檔資料庫
+        save_db(st.session_state.gallery)
+        st.success("上傳成功！")
         st.rerun()
 
-# --- 主畫面：瀏覽 ---
-# (為了效能，這裡我們只顯示資訊，圖片需要額外邏輯讀取，我們先做簡易版)
+# === 主畫面：瀏覽與篩選 ===
 st.divider()
-st.subheader("📂 雲端檔案列表")
 
-# 篩選器
 col1, col2 = st.columns(2)
 with col1:
     filter_date = st.date_input("📅 篩選日期", value=None)
 with col2:
     filter_tags = st.multiselect("🏷️ 篩選標籤", TAG_OPTIONS)
 
-# 顯示
-for idx, photo in enumerate(st.session_state.gallery):
+displayed_count = 0
+
+# 反轉列表 (reversed)，讓最新的照片顯示在最前面
+for photo in reversed(st.session_state.gallery):
+    # 篩選邏輯
     date_match = (filter_date is None) or (photo['date'] == filter_date)
     tag_match = not filter_tags or all(tag in photo['tags'] for tag in filter_tags)
     
     if date_match and tag_match:
+        displayed_count += 1
         with st.container(border=True):
-            c1, c2 = st.columns([1, 3])
+            c1, c2 = st.columns([1, 2])
             with c1:
-                st.info(f"🖼️ ID: {photo['id']}") 
-                # 進階：這裡如果要顯示圖片，需要呼叫 API 下載，會比較慢
-                # st.image(...) 
+                # 顯示圖片 (直接使用 Cloudinary 網址)
+                st.image(photo['url'], use_container_width=True)
+            
             with c2:
-                st.markdown(f"**{photo['name']}**")
+                st.subheader(photo['name'])
                 st.caption(f"📅 {photo['date']}")
                 
                 # 編輯標籤
-                current_tags = st.multiselect("標籤", TAG_OPTIONS, default=photo['tags'], key=f"t_{photo['id']}")
-                if current_tags != photo['tags']:
-                    photo['tags'] = current_tags
-                    # 這裡偷懶：每改一個就存檔一次會比較慢，實際應用可以用「儲存按鈕」一次存
-                    # 為了教學方便，我們省略即時存檔，請使用者按「儲存變更」
-                    
-                if st.button("🗑️ 刪除索引", key=f"d_{photo['id']}"):
+                # key 加上 public_id 確保每個選單都是獨立的
+                new_tags = st.multiselect("標籤", TAG_OPTIONS, default=photo['tags'], key=f"t_{photo['public_id']}")
+                
+                col_btn1, col_btn2 = st.columns(2)
+                
+                # 按鈕：儲存標籤
+                if col_btn1.button("💾 儲存", key=f"s_{photo['public_id']}"):
+                    # 更新記憶體中的資料
+                    photo['tags'] = new_tags
+                    # 更新雲端資料庫
+                    save_db(st.session_state.gallery)
+                    st.toast("標籤已更新！")
+                
+                # 按鈕：刪除照片
+                if col_btn2.button("🗑️ 刪除", key=f"d_{photo['public_id']}"):
+                    # 1. 刪除雲端圖片
+                    delete_image(photo['public_id'])
+                    # 2. 從清單中移除
                     st.session_state.gallery.remove(photo)
+                    # 3. 更新資料庫
+                    save_db(st.session_state.gallery)
                     st.rerun()
 
-if st.button("💾 儲存所有變更 (標籤/刪除)"):
-    # 轉換資料格式以存檔
-    save_list = [{
-        "id": p['id'],
-        "name": p['name'],
-        "date_str": p['date'].strftime("%Y-%m-%d"),
-        "tags": p['tags']
-    } for p in st.session_state.gallery]
-    
-    upload_db(drive_service, save_list)
-    st.success("資料庫已更新！")
+if displayed_count == 0:
+    st.info("目前沒有照片。請從側邊欄上傳第一張照片吧！(第一次上傳會自動建立資料庫)")
