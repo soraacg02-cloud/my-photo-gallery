@@ -9,8 +9,8 @@ from io import BytesIO
 import time
 
 # 設定網頁標題
-st.set_page_config(page_title="雲端相簿 Ultimate", layout="wide")
-st.title("☁️ 雲端相簿 Ultimate (全選+切換視圖)")
+st.set_page_config(page_title="雲端相簿 Ultimate+", layout="wide")
+st.title("☁️ 雲端相簿 Ultimate+ (手機網格優化版)")
 
 # --- 1. Cloudinary 連線設定 ---
 if "cloudinary" in st.secrets:
@@ -23,7 +23,38 @@ if "cloudinary" in st.secrets:
 
 DB_FILENAME = "photo_db_v2.json"
 
-# --- 2. 核心功能函數 ---
+# --- 2. CSS 樣式注入 (解決手機版單欄問題) ---
+def inject_custom_css():
+    st.markdown("""
+    <style>
+    /* 調整多選選單的標籤顯示樣式 */
+    span[data-baseweb="tag"] {
+        background-color: #ff4b4b !important;
+    }
+    
+    /* === 手機版強制雙欄魔法 ===
+      Streamlit 預設手機會變單欄，這裡強制在寬度小於 640px 時，
+      讓 column 維持 50% 寬度。
+      注意：這會影響全站的 column 排版。
+    */
+    @media (max-width: 640px) {
+        div[data-testid="column"] {
+            width: 50% !important;
+            flex: 1 1 50% !important;
+            min-width: 50% !important;
+        }
+        /* 讓圖片容器自動適應 */
+        div[data-testid="column"] > div {
+            width: 100% !important;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# 呼叫 CSS 函數
+inject_custom_css()
+
+# --- 3. 核心功能函數 ---
 def load_db():
     try:
         url, options = cloudinary.utils.cloudinary_url(DB_FILENAME, resource_type="raw")
@@ -55,14 +86,20 @@ def save_db(data):
 def delete_image_from_cloud(public_id):
     cloudinary.uploader.destroy(public_id)
 
-# --- 3. 應用程式主邏輯 ---
+# --- 4. 應用程式主邏輯 ---
 if 'gallery' not in st.session_state:
     with st.spinner('載入資料庫...'):
         st.session_state.gallery = load_db()
 
+# 整理所有資料以供篩選
 existing_albums = sorted(list(set([item['album'] for item in st.session_state.gallery])))
 if "未分類" not in existing_albums: existing_albums.append("未分類")
-TAG_OPTIONS = ["人像", "風景", "美食", "工作", "回憶"]
+
+# 自動抓取資料庫中所有出現過的標籤 (動態標籤)
+existing_tags = sorted(list(set([tag for item in st.session_state.gallery for tag in item['tags']])))
+# 預設標籤選項 + 現有標籤
+DEFAULT_TAGS = ["人像", "風景", "美食", "工作", "回憶"]
+ALL_TAG_OPTIONS = sorted(list(set(DEFAULT_TAGS + existing_tags)))
 
 # === 側邊欄：上傳與設定 ===
 with st.sidebar:
@@ -71,7 +108,7 @@ with st.sidebar:
     if album_mode == "建立新相簿":
         current_album = st.text_input("輸入新相簿名稱")
     else:
-        current_album = st.selectbox("選擇相簿", existing_albums)
+        current_album = st.selectbox("選擇上傳相簿", existing_albums)
 
     uploaded_files = st.file_uploader("選擇照片 (可多選)", type=['jpg', 'png', 'jpeg'], accept_multiple_files=True)
     
@@ -82,10 +119,8 @@ with st.sidebar:
             for i, f in enumerate(uploaded_files):
                 try:
                     res = cloudinary.uploader.upload(f)
-                    try: 
-                        d = datetime.datetime.strptime(f.name[:8], "%Y%m%d").date()
-                    except: 
-                        d = datetime.date.today()
+                    try: d = datetime.datetime.strptime(f.name[:8], "%Y%m%d").date()
+                    except: d = datetime.date.today()
                     st.session_state.gallery.append({
                         "public_id": res['public_id'], "url": res['secure_url'], 
                         "name": f.name, "date": d, "tags": [], "album": current_album
@@ -101,99 +136,99 @@ with st.sidebar:
 
 # 1. 篩選工具列 (Filter Toolbar)
 st.subheader("🔍 篩選條件")
-c1, c2, c3 = st.columns(3)
 
-with c1:
-    filter_album = st.selectbox("相簿", ["全部"] + existing_albums)
+# 第一排篩選：相簿 + 標籤 (使用者最常用的)
+row1_c1, row1_c2 = st.columns([1, 2])
+with row1_c1:
+    filter_album = st.selectbox("📂 相簿", ["全部"] + existing_albums)
+with row1_c2:
+    # 新增：標籤篩選器
+    filter_tags = st.multiselect("🏷️ 標籤 (同時符合)", existing_tags)
 
-# 準備年月資料
+# 第二排篩選：年份 + 月份
+row2_c1, row2_c2 = st.columns(2)
 all_years = sorted(list(set([p['date'].year for p in st.session_state.gallery])), reverse=True)
 all_months = list(range(1, 13))
 
-with c2:
-    filter_year = st.selectbox("年份", ["全部"] + all_years)
-with c3:
-    filter_month = st.selectbox("月份", ["全部"] + all_months)
+with row2_c1:
+    filter_year = st.selectbox("📅 年份", ["全部"] + all_years)
+with row2_c2:
+    filter_month = st.selectbox("🌙 月份", ["全部"] + all_months)
 
-# 執行篩選
-filtered_photos = [
-    p for p in st.session_state.gallery 
-    if ((filter_album == "全部") or (p['album'] == filter_album)) and
-       ((filter_year == "全部") or (p['date'].year == filter_year)) and
-       ((filter_month == "全部") or (p['date'].month == filter_month))
-]
+# 執行篩選邏輯
+filtered_photos = []
+for p in st.session_state.gallery:
+    # A. 基礎篩選 (相簿/年/月)
+    match_album = (filter_album == "全部") or (p['album'] == filter_album)
+    match_year = (filter_year == "全部") or (p['date'].year == filter_year)
+    match_month = (filter_month == "全部") or (p['date'].month == filter_month)
+    
+    # B. 標籤篩選 logic: 如果有選標籤，照片必須包含"所有"選中的標籤 (交集運算)
+    # 如果希望是"包含任一"標籤，可將 all 改為 any
+    match_tags = True
+    if filter_tags:
+        match_tags = all(tag in p['tags'] for tag in filter_tags)
+    
+    if match_album and match_year and match_month and match_tags:
+        filtered_photos.append(p)
 
 st.divider()
 
-# 2. 檢視與選取控制列 (View & Selection Control)
+# 2. 檢視與選取控制列
 ctrl_c1, ctrl_c2 = st.columns([1, 1])
-
 with ctrl_c1:
-    # 瀏覽模式切換
-    view_mode = st.radio("👀 瀏覽模式", ["網格 (3欄)", "大圖 (1欄)"], horizontal=True)
-    if view_mode == "網格 (3欄)":
-        num_columns = 3
-    else:
-        num_columns = 1
+    view_mode = st.radio("👀 瀏覽模式", ["網格", "大圖"], horizontal=True)
+    # 網格模式設為 3 欄 (CSS 會強制手機版變 2 欄)
+    num_columns = 3 if view_mode == "網格" else 1
 
 with ctrl_c2:
-    # 全選/取消全選按鈕
     st.write("批次選取")
     sel_c1, sel_c2 = st.columns(2)
-    if sel_c1.button("✅ 全選本頁"):
+    if sel_c1.button("✅ 全選"):
         for p in filtered_photos:
             st.session_state[f"sel_{p['public_id']}"] = True
         st.rerun()
-    
-    if sel_c2.button("❎ 取消全選"):
+    if sel_c2.button("❎ 取消"):
         for p in filtered_photos:
             st.session_state[f"sel_{p['public_id']}"] = False
         st.rerun()
 
-# 3. 照片展示區 (Gallery)
+# 3. 照片展示區
 selected_photos = [] 
 
 if filtered_photos:
     cols = st.columns(num_columns)
-    
     for idx, photo in enumerate(filtered_photos):
         with cols[idx % num_columns]:
-            # 決定顯示尺寸
-            use_width = True # 網格模式自動調整
+            st.image(photo['url'], use_container_width=True)
             
-            st.image(photo['url'], use_container_width=use_width)
-            
-            # 檢查 Checkbox 狀態
             key = f"sel_{photo['public_id']}"
-            # 如果 key 不在 session_state，初始化為 False
-            if key not in st.session_state:
-                st.session_state[key] = False
+            if key not in st.session_state: st.session_state[key] = False
             
-            is_selected = st.checkbox(
-                f"{photo['name']}", 
-                key=key
-            )
+            # Checkbox
+            is_selected = st.checkbox(f"{photo['name']}", key=key)
             
+            # 顯示標籤
             if photo['tags']:
                 st.caption(f"🏷️ {','.join(photo['tags'])}")
             
-            # 只有在大圖模式才顯示詳細日期，避免網格太擠
             if num_columns == 1:
-                st.text(f"相簿: {photo['album']} | 日期: {photo['date']}")
+                 st.text(f"相簿: {photo['album']} | 日期: {photo['date']}")
             
-            st.write("---")
+            # 為了手機版美觀，這裡加一個空白間隔
+            st.write("") 
             
             if is_selected:
                 selected_photos.append(photo)
 
-# 4. 批次操作區 (Batch Actions)
-# 使用 fixed container 讓操作區在照片很多時也能容易看到 (Streamlit 原生不支援 sticky footer，這裡放底部)
+# 4. 批次操作區 (Sticky style at bottom)
 if selected_photos:
-    st.warning(f"⚡ 目前已選取 {len(selected_photos)} 張照片")
+    st.markdown("---")
+    st.warning(f"⚡ 已選取 {len(selected_photos)} 張照片")
     
     act_c1, act_c2 = st.columns(2)
     with act_c1:
-        new_tags = st.multiselect("批次標籤", TAG_OPTIONS)
+        new_tags = st.multiselect("批次設定標籤", ALL_TAG_OPTIONS)
         if st.button("更新標籤"):
             for p in selected_photos:
                 for origin in st.session_state.gallery:
@@ -205,7 +240,7 @@ if selected_photos:
             st.rerun()
             
     with act_c2:
-        if st.button("🗑️ 刪除選取項目", type="primary"):
+        if st.button("🗑️ 刪除照片", type="primary"):
             for p in selected_photos:
                 delete_image_from_cloud(p['public_id'])
                 st.session_state.gallery = [x for x in st.session_state.gallery if x['public_id'] != p['public_id']]
@@ -214,7 +249,5 @@ if selected_photos:
             time.sleep(1)
             st.rerun()
 else:
-    if filtered_photos:
-        st.info("💡 勾選上方照片進行操作")
-    else:
+    if not filtered_photos:
         st.warning("沒有符合篩選條件的照片")
