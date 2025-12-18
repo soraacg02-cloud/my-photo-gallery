@@ -9,7 +9,7 @@ from io import BytesIO
 import time
 
 # 設定網頁標題
-st.set_page_config(page_title="雲端圖庫 (插畫專用版)", layout="wide")
+st.set_page_config(page_title="雲端圖庫 Ultimate", layout="wide")
 st.title("☁️ 雲端圖庫 (插畫管理版)")
 
 # --- 1. Cloudinary 連線設定 ---
@@ -94,13 +94,8 @@ if 'gallery' not in st.session_state:
 existing_albums = sorted(list(set([item['album'] for item in st.session_state.gallery])))
 if "未分類" not in existing_albums: existing_albums.append("未分類")
 
-# 自動抓取資料庫中已經用過的標籤
 existing_tags = sorted(list(set([tag for item in st.session_state.gallery for tag in item['tags']])))
-
-# [修改處] 更新預設標籤為您的需求
 DEFAULT_TAGS = ["彩色", "線稿", "單人", "雙人"]
-
-# 合併標籤：確保舊照片上的標籤 (如: 風景) 不會消失，同時加入新的預設標籤
 ALL_TAG_OPTIONS = sorted(list(set(DEFAULT_TAGS + existing_tags)))
 
 # === 側邊欄：上傳 ===
@@ -144,7 +139,6 @@ f_c1, f_c2 = st.columns([1, 2])
 with f_c1:
     filter_album = st.selectbox("📂 相簿", ["全部"] + existing_albums)
 with f_c2:
-    # 這裡會顯示新的標籤選項
     filter_tags = st.multiselect("🏷️ 標籤篩選 (同時符合)", existing_tags)
 
 # 第二排：排序 + 年份 + 月份
@@ -191,7 +185,16 @@ elif sort_option == "檔名 (Z→A)":
 elif sort_option == "標籤 (A→Z)":
     filtered_photos.sort(key=lambda x: x['tags'][0] if x['tags'] else "zzzz")
 
+# [新增功能] 顯示結果統計 (放在篩選後，但在照片展示前)
 st.divider()
+
+if filtered_photos:
+    # 這裡顯示醒目的計數
+    st.markdown(f"""
+    ### 📸 共找到 :red[{len(filtered_photos)}] 張照片
+    """)
+else:
+    st.warning("⚠️ 共找到 0 張照片，請嘗試調整篩選條件。")
 
 # 2. 檢視與操作列
 ctrl_c1, ctrl_c2 = st.columns([1, 1])
@@ -201,10 +204,10 @@ with ctrl_c1:
 
 with ctrl_c2:
     sel_c1, sel_c2 = st.columns(2)
-    if sel_c1.button("✅ 全選"):
+    if sel_c1.button("✅ 全選本頁"):
         for p in filtered_photos: st.session_state[f"sel_{p['public_id']}"] = True
         st.rerun()
-    if sel_c2.button("❎ 取消"):
+    if sel_c2.button("❎ 取消全選"):
         for p in filtered_photos: st.session_state[f"sel_{p['public_id']}"] = False
         st.rerun()
 
@@ -241,7 +244,6 @@ if selected_photos:
     
     act_c1, act_c2 = st.columns(2)
     with act_c1:
-        # [修改處] 這裡的選項會使用新的標籤清單
         new_tags = st.multiselect("批次設定標籤", ALL_TAG_OPTIONS)
         if st.button("更新標籤"):
             for p in selected_photos:
@@ -262,6 +264,9 @@ if selected_photos:
             st.success("已刪除！")
             time.sleep(1)
             st.rerun()
-else:
-    if not filtered_photos:
-        st.warning("沒有符合篩選條件的照片")
+            
+    st.write("") 
+    if st.button("❎ 取消所有選取 (離開編輯模式)", use_container_width=True):
+        for p in filtered_photos:
+            st.session_state[f"sel_{p['public_id']}"] = False
+        st.rerun()
