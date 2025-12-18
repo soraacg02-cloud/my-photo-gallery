@@ -85,6 +85,13 @@ def save_db(data):
 def delete_image_from_cloud(public_id):
     cloudinary.uploader.destroy(public_id)
 
+# [新增功能] 這是專門用來清除選取的回呼函式
+# 它會在頁面重新整理"之前"執行，所以不會報錯
+def clear_all_selections():
+    for key in st.session_state.keys():
+        if key.startswith("sel_"):
+            st.session_state[key] = False
+
 # --- 4. 應用程式主邏輯 ---
 if 'gallery' not in st.session_state:
     with st.spinner('載入資料庫...'):
@@ -185,14 +192,10 @@ elif sort_option == "檔名 (Z→A)":
 elif sort_option == "標籤 (A→Z)":
     filtered_photos.sort(key=lambda x: x['tags'][0] if x['tags'] else "zzzz")
 
-# [新增功能] 顯示結果統計 (放在篩選後，但在照片展示前)
+# 統計顯示
 st.divider()
-
 if filtered_photos:
-    # 這裡顯示醒目的計數
-    st.markdown(f"""
-    ### 📸 共找到 :red[{len(filtered_photos)}] 張照片
-    """)
+    st.markdown(f"### 📸 共找到 :red[{len(filtered_photos)}] 張照片")
 else:
     st.warning("⚠️ 共找到 0 張照片，請嘗試調整篩選條件。")
 
@@ -204,6 +207,7 @@ with ctrl_c1:
 
 with ctrl_c2:
     sel_c1, sel_c2 = st.columns(2)
+    # 上方的全選按鈕也可以優化為 callback，但這裡先保持原樣以免變動太大
     if sel_c1.button("✅ 全選本頁"):
         for p in filtered_photos: st.session_state[f"sel_{p['public_id']}"] = True
         st.rerun()
@@ -237,7 +241,7 @@ if filtered_photos:
             if is_selected:
                 selected_photos.append(photo)
 
-# 4. 批次操作區
+# 4. 批次操作區 (Fixed!)
 if selected_photos:
     st.markdown("---")
     st.info(f"⚡ 已選取 {len(selected_photos)} 張照片")
@@ -266,7 +270,12 @@ if selected_photos:
             st.rerun()
             
     st.write("") 
-    if st.button("❎ 取消所有選取 (離開編輯模式)", use_container_width=True):
-        for p in filtered_photos:
-            st.session_state[f"sel_{p['public_id']}"] = False
-        st.rerun()
+    # [修正] 這裡使用了 on_click 參數
+    st.button("❎ 取消所有選取 (離開編輯模式)", 
+              use_container_width=True, 
+              on_click=clear_all_selections) 
+    # 注意：使用了 on_click 後，就不需要寫 if st.button(...): ... 了
+    
+else:
+    if not filtered_photos:
+        st.warning("沒有符合篩選條件的照片")
