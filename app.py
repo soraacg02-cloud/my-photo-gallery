@@ -85,8 +85,7 @@ def save_db(data):
 def delete_image_from_cloud(public_id):
     cloudinary.uploader.destroy(public_id)
 
-# [新增功能] 這是專門用來清除選取的回呼函式
-# 它會在頁面重新整理"之前"執行，所以不會報錯
+# 清除選取的回呼函式
 def clear_all_selections():
     for key in st.session_state.keys():
         if key.startswith("sel_"):
@@ -152,9 +151,10 @@ with f_c2:
 f_c3, f_c4, f_c5 = st.columns([2, 1, 1]) 
 
 with f_c3:
+    # [修改處] 將 "日期 (新→舊)" 移到列表的第一個位置，使其成為預設值
     sort_option = st.selectbox(
         "🔃 排序方式", 
-        ["日期 (舊→新)", "日期 (新→舊)", "檔名 (A→Z)", "檔名 (Z→A)", "標籤 (A→Z)"],
+        ["日期 (新→舊)", "日期 (舊→新)", "檔名 (A→Z)", "檔名 (Z→A)", "標籤 (A→Z)"],
         index=0 
     )
 
@@ -207,7 +207,6 @@ with ctrl_c1:
 
 with ctrl_c2:
     sel_c1, sel_c2 = st.columns(2)
-    # 上方的全選按鈕也可以優化為 callback，但這裡先保持原樣以免變動太大
     if sel_c1.button("✅ 全選本頁"):
         for p in filtered_photos: st.session_state[f"sel_{p['public_id']}"] = True
         st.rerun()
@@ -241,7 +240,7 @@ if filtered_photos:
             if is_selected:
                 selected_photos.append(photo)
 
-# 4. 批次操作區 (Fixed!)
+# 4. 批次操作區
 if selected_photos:
     st.markdown("---")
     st.info(f"⚡ 已選取 {len(selected_photos)} 張照片")
@@ -270,11 +269,9 @@ if selected_photos:
             st.rerun()
             
     st.write("") 
-    # [修正] 這裡使用了 on_click 參數
     st.button("❎ 取消所有選取 (離開編輯模式)", 
               use_container_width=True, 
               on_click=clear_all_selections) 
-    # 注意：使用了 on_click 後，就不需要寫 if st.button(...): ... 了
     
 else:
     if not filtered_photos:
