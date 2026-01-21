@@ -2,3 +2,4 @@ streamlit
 pandas
 requests
 cloudinary
+streamlit-image-zoom
