@@ -7,7 +7,8 @@ import cloudinary.uploader
 import cloudinary.api
 from io import BytesIO
 import time
-import pandas as pd 
+import pandas as pd
+from streamlit_image_zoom import image_zoom  # [新增] 引入強力縮放元件
 
 # 設定網頁標題
 st.set_page_config(page_title="雲端圖庫 Ultimate", layout="wide")
@@ -76,12 +77,22 @@ def clear_all_selections():
         if key.startswith("sel_"):
             st.session_state[key] = False
 
-# [新增] 大圖預覽的彈出視窗 (Modal)
-@st.dialog("📸 照片詳情")
+# [已修改] 大圖預覽的彈出視窗 (Modal) - 升級為強力縮放版
+@st.dialog("📸 照片詳情", width="large")
 def show_large_image(photo):
-    # 顯示大圖
-    st.image(photo['url'], use_container_width=True)
-    
+    # 使用 container 來控制高度
+    with st.container(height=600):
+        # [核心修改] 使用 image_zoom 替換原本的 st.image
+        image_zoom(
+            photo['url'], 
+            mode="contain",
+            keep_aspect_ratio=True,
+            margin=0
+        )
+        st.caption("💡 操作提示：電腦版請使用「滑鼠滾輪」縮放；手機版請使用「雙指捏合」縮放。")
+
+    st.divider()
+
     # 顯示詳細資訊
     st.markdown(f"**檔名**: {photo['name']}")
     
@@ -95,7 +106,7 @@ def show_large_image(photo):
         else:
             st.write("🏷️ **標籤**: (無)")
 
-    # 下載按鈕 (額外貼心功能)
+    # 下載按鈕
     st.download_button(
         label="⬇️ 下載原始圖檔",
         data=requests.get(photo['url']).content,
@@ -103,7 +114,6 @@ def show_large_image(photo):
         mime="image/jpeg",
         use_container_width=True
     )
-
 
 # --- 4. 應用程式主邏輯 ---
 if 'gallery' not in st.session_state:
@@ -176,6 +186,7 @@ if page_mode == "📸 相簿瀏覽":
     # 第二排：排序 + 年份 + 月份
     f_c3, f_c4, f_c5 = st.columns([2, 1, 1]) 
     with f_c3:
+        # 預設：日期 (新→舊)
         sort_option = st.selectbox("🔃 排序方式", 
             ["日期 (新→舊)", "日期 (舊→新)", "檔名 (A→Z)", "檔名 (Z→A)", "標籤 (A→Z)"], index=0)
     with f_c4:
@@ -231,32 +242,27 @@ if page_mode == "📸 相簿瀏覽":
             for p in filtered_photos: st.session_state[f"sel_{p['public_id']}"] = False
             st.rerun()
 
-    # 3. 照片展示區 (Updated with Zoom)
+    # 3. 照片展示區
     selected_photos = [] 
     if filtered_photos:
         cols = st.columns(num_columns)
         for idx, photo in enumerate(filtered_photos):
             with cols[idx % num_columns]:
-                # 顯示圖片
                 st.image(photo['url'], use_container_width=True)
                 
-                # [按鈕區] 把放大按鈕和勾選框分開
-                # 使用 columns 讓按鈕不要太大
+                # 按鈕與勾選框
                 btn_col, check_col = st.columns([1, 4]) 
                 
                 with btn_col:
-                    # 放大鏡按鈕 (如果點擊，觸發 show_large_image)
+                    # 點擊後會觸發 image_zoom 的彈出視窗
                     if st.button("🔍", key=f"zoom_{photo['public_id']}", help="點擊放大圖片"):
                         show_large_image(photo)
                 
                 with check_col:
-                    # 勾選框
                     key = f"sel_{photo['public_id']}"
                     if key not in st.session_state: st.session_state[key] = False
-                    # 為了版面整齊，我們把 checkbox 的標籤設為空白，因為上面已經有圖片了
                     is_selected = st.checkbox(f"{photo['name']}", key=key)
 
-                # 顯示標籤資訊
                 if photo['tags']: st.caption(f"🏷️ {','.join(photo['tags'])}")
                 else: st.caption("❌ 未分類") 
                 
@@ -292,7 +298,7 @@ if page_mode == "📸 相簿瀏覽":
         st.button("❎ 取消所有選取 (離開編輯模式)", use_container_width=True, on_click=clear_all_selections) 
 
 else:
-    # 統計頁面 (保持不變)
+    # 統計頁面
     st.header("📊 數據統計中心")
     st.write("查看您每個月的創作產量統計")
     
