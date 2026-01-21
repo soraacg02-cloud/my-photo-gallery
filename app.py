@@ -7,7 +7,7 @@ import cloudinary.uploader
 import cloudinary.api
 from io import BytesIO
 import time
-import pandas as pd # 我們需要 pandas 來做漂亮的統計表
+import pandas as pd 
 
 # 設定網頁標題
 st.set_page_config(page_title="雲端圖庫 Ultimate", layout="wide")
@@ -76,6 +76,35 @@ def clear_all_selections():
         if key.startswith("sel_"):
             st.session_state[key] = False
 
+# [新增] 大圖預覽的彈出視窗 (Modal)
+@st.dialog("📸 照片詳情")
+def show_large_image(photo):
+    # 顯示大圖
+    st.image(photo['url'], use_container_width=True)
+    
+    # 顯示詳細資訊
+    st.markdown(f"**檔名**: {photo['name']}")
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        st.write(f"📅 **日期**: {photo['date']}")
+        st.write(f"📂 **相簿**: {photo['album']}")
+    with c2:
+        if photo['tags']:
+            st.write(f"🏷️ **標籤**: {', '.join(photo['tags'])}")
+        else:
+            st.write("🏷️ **標籤**: (無)")
+
+    # 下載按鈕 (額外貼心功能)
+    st.download_button(
+        label="⬇️ 下載原始圖檔",
+        data=requests.get(photo['url']).content,
+        file_name=photo['name'],
+        mime="image/jpeg",
+        use_container_width=True
+    )
+
+
 # --- 4. 應用程式主邏輯 ---
 if 'gallery' not in st.session_state:
     with st.spinner('載入資料庫...'):
@@ -92,7 +121,6 @@ ALL_TAG_OPTIONS = sorted(list(set(DEFAULT_TAGS + existing_tags)))
 # === 側邊欄：功能選單與上傳 ===
 with st.sidebar:
     st.header("功能選單")
-    # [新增] 頁面切換開關
     page_mode = st.radio("前往頁面", ["📸 相簿瀏覽", "📊 數據統計"])
     
     st.divider()
@@ -129,25 +157,20 @@ with st.sidebar:
 # === 頁面邏輯分流 ===
 
 if page_mode == "📸 相簿瀏覽":
-    # ---------------------------------------------------------
-    #  原本的相簿瀏覽頁面 (Gallery View)
-    # ---------------------------------------------------------
     st.subheader("🔍 瀏覽設定")
 
-    # 第一排：相簿 + 標籤 + [新增] 未分類開關
+    # 第一排：相簿 + 標籤 + 未分類開關
     f_c1, f_c2 = st.columns([1, 2])
     with f_c1:
         filter_album = st.selectbox("📂 相簿", ["全部"] + existing_albums)
     
     with f_c2:
-        # [新增] 使用 columns 讓標籤篩選和 "只看未分類" 並排
         tag_col1, tag_col2 = st.columns([3, 1])
         with tag_col1:
             filter_tags = st.multiselect("🏷️ 標籤篩選", existing_tags, disabled=False)
         with tag_col2:
-            st.write("") # 排版用，往下推一點
             st.write("") 
-            # [新增功能 2] 只顯示未分類
+            st.write("") 
             show_untagged = st.checkbox("只看未分類", help("勾選後，將只顯示沒有任何標籤的圖片"))
 
     # 第二排：排序 + 年份 + 月份
@@ -169,12 +192,9 @@ if page_mode == "📸 相簿瀏覽":
         match_year = (filter_year == "全部") or (p['date'].year == filter_year)
         match_month = (filter_month == "全部") or (p['date'].month == filter_month)
         
-        # [修改邏輯] 標籤篩選邏輯
         if show_untagged:
-            # 如果勾選了"只看未分類"，那麼這張照片必須沒有任何標籤 (tags 是空的)
             match_tags = (len(p['tags']) == 0)
         else:
-            # 否則執行原本的篩選邏輯
             match_tags = True
             if filter_tags:
                 match_tags = all(tag in p['tags'] for tag in filter_tags)
@@ -211,18 +231,35 @@ if page_mode == "📸 相簿瀏覽":
             for p in filtered_photos: st.session_state[f"sel_{p['public_id']}"] = False
             st.rerun()
 
-    # 3. 照片展示區
+    # 3. 照片展示區 (Updated with Zoom)
     selected_photos = [] 
     if filtered_photos:
         cols = st.columns(num_columns)
         for idx, photo in enumerate(filtered_photos):
             with cols[idx % num_columns]:
+                # 顯示圖片
                 st.image(photo['url'], use_container_width=True)
-                key = f"sel_{photo['public_id']}"
-                if key not in st.session_state: st.session_state[key] = False
-                is_selected = st.checkbox(f"{photo['name']}", key=key)
+                
+                # [按鈕區] 把放大按鈕和勾選框分開
+                # 使用 columns 讓按鈕不要太大
+                btn_col, check_col = st.columns([1, 4]) 
+                
+                with btn_col:
+                    # 放大鏡按鈕 (如果點擊，觸發 show_large_image)
+                    if st.button("🔍", key=f"zoom_{photo['public_id']}", help="點擊放大圖片"):
+                        show_large_image(photo)
+                
+                with check_col:
+                    # 勾選框
+                    key = f"sel_{photo['public_id']}"
+                    if key not in st.session_state: st.session_state[key] = False
+                    # 為了版面整齊，我們把 checkbox 的標籤設為空白，因為上面已經有圖片了
+                    is_selected = st.checkbox(f"{photo['name']}", key=key)
+
+                # 顯示標籤資訊
                 if photo['tags']: st.caption(f"🏷️ {','.join(photo['tags'])}")
-                else: st.caption("❌ 未分類") # 提示未分類
+                else: st.caption("❌ 未分類") 
+                
                 if num_columns == 1: st.text(f"相簿: {photo['album']} | 日期: {photo['date']}")
                 st.write("") 
                 if is_selected: selected_photos.append(photo)
@@ -255,44 +292,33 @@ if page_mode == "📸 相簿瀏覽":
         st.button("❎ 取消所有選取 (離開編輯模式)", use_container_width=True, on_click=clear_all_selections) 
 
 else:
-    # ---------------------------------------------------------
-    #  [新增功能 1] 數據統計頁面 (Statistics View)
-    # ---------------------------------------------------------
+    # 統計頁面 (保持不變)
     st.header("📊 數據統計中心")
     st.write("查看您每個月的創作產量統計")
     
     if not st.session_state.gallery:
         st.info("目前還沒有照片，請先上傳！")
     else:
-        # 1. 準備數據
-        # 我們要把資料整理成: [{'Year': 2023, 'Month': 5, 'Count': 10}, ...] 的格式
-        stats_data = {} # 用字典先計數 {(2023, 5): 10, ...}
-        
+        stats_data = {} 
         for p in st.session_state.gallery:
             y = p['date'].year
             m = p['date'].month
             key = (y, m)
-            if key in stats_data:
-                stats_data[key] += 1
-            else:
-                stats_data[key] = 1
+            if key in stats_data: stats_data[key] += 1
+            else: stats_data[key] = 1
         
-        # 轉成 DataFrame 表格
         df_list = []
         for (year, month), count in stats_data.items():
             df_list.append({
                 "年份": year,
                 "月份": month,
                 "數量 (張)": count,
-                "年月標籤": f"{year}-{month:02d}" # 用來畫圖的 X 軸
+                "年月標籤": f"{year}-{month:02d}" 
             })
             
         df = pd.DataFrame(df_list)
-        
-        # 排序：先按年，再按月
         df = df.sort_values(by=["年份", "月份"], ascending=False)
         
-        # 2. 顯示總量指標 (Metrics)
         total_photos = len(st.session_state.gallery)
         untagged_count = len([p for p in st.session_state.gallery if not p['tags']])
         
@@ -302,18 +328,9 @@ else:
         m3.metric("📅 統計月份數", len(df))
         
         st.divider()
-
-        # 3. 顯示圖表 (Bar Chart)
         st.subheader("📈 每月上傳趨勢")
-        # 為了畫圖漂亮，我們把 '年月標籤' 當索引
         chart_data = df.set_index("年月標籤")[["數量 (張)"]]
         st.bar_chart(chart_data, color="#ff4b4b")
         
-        # 4. 顯示詳細表格
         st.subheader("📋 詳細數據表")
-        # 隱藏索引列，只顯示數據
-        st.dataframe(
-            df[["年份", "月份", "數量 (張)"]], 
-            use_container_width=True,
-            hide_index=True
-        )
+        st.dataframe(df[["年份", "月份", "數量 (張)"]], use_container_width=True, hide_index=True)
