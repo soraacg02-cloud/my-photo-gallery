@@ -7,12 +7,11 @@ import cloudinary.uploader
 import cloudinary.api
 from io import BytesIO
 import time
-import pandas as pd
-from streamlit_image_zoom import image_zoom  # [新增] 引入強力縮放元件
+import pandas as pd 
 
 # 設定網頁標題
 st.set_page_config(page_title="雲端圖庫 Ultimate", layout="wide")
-st.title("☁️ 雲端圖庫 (插畫管理版)")
+st.title("☁️ 雲端圖庫 (穩定防呆版)")
 
 # --- 1. Cloudinary 連線設定 ---
 if "cloudinary" in st.secrets:
@@ -25,15 +24,29 @@ if "cloudinary" in st.secrets:
 
 DB_FILENAME = "photo_db_v2.json"
 
-# --- 2. CSS 強力修正 (手機網格) ---
+# --- 2. CSS 強力修正 (手機雙欄網格 + 按鈕優化) ---
 def inject_custom_css():
     st.markdown("""
     <style>
+    /* 標籤顏色 */
     span[data-baseweb="tag"] { background-color: #ff4b4b !important; }
+    
+    /* 手機版強制雙欄 (Mobile Grid Fix) */
     @media (max-width: 640px) {
-        [data-testid="column"] { width: 50% !important; flex: 1 1 50% !important; min-width: 50% !important; }
-        [data-testid="column"] img { max-width: 100% !important; height: auto !important; }
-        .stButton button { width: 100%; padding: 0.25rem 0.5rem; }
+        [data-testid="column"] { 
+            width: 50% !important; 
+            flex: 1 1 50% !important; 
+            min-width: 50% !important; 
+        }
+        [data-testid="column"] img { 
+            max-width: 100% !important; 
+            height: auto !important; 
+        }
+        /* 調整按鈕大小以免手機誤觸 */
+        .stButton button { 
+            width: 100%; 
+            padding: 0.25rem 0.5rem; 
+        }
     }
     </style>
     """, unsafe_allow_html=True)
@@ -77,20 +90,12 @@ def clear_all_selections():
         if key.startswith("sel_"):
             st.session_state[key] = False
 
-# [已修改] 大圖預覽的彈出視窗 (Modal) - 升級為強力縮放版
+# [原生穩定版] 大圖預覽視窗
 @st.dialog("📸 照片詳情", width="large")
 def show_large_image(photo):
-    # 使用 container 來控制高度
-    with st.container(height=600):
-        # [核心修改] 使用 image_zoom 替換原本的 st.image
-        image_zoom(
-            photo['url'], 
-            mode="contain",
-            keep_aspect_ratio=True,
-            margin=0
-        )
-        st.caption("💡 操作提示：電腦版請使用「滑鼠滾輪」縮放；手機版請使用「雙指捏合」縮放。")
-
+    # 使用原生 st.image，設為容器寬度，保證能看清楚
+    st.image(photo['url'], use_container_width=True)
+    
     st.divider()
 
     # 顯示詳細資訊
@@ -114,6 +119,7 @@ def show_large_image(photo):
         mime="image/jpeg",
         use_container_width=True
     )
+
 
 # --- 4. 應用程式主邏輯 ---
 if 'gallery' not in st.session_state:
@@ -169,7 +175,7 @@ with st.sidebar:
 if page_mode == "📸 相簿瀏覽":
     st.subheader("🔍 瀏覽設定")
 
-    # 第一排：相簿 + 標籤 + 未分類開關
+    # 第一排：相簿 + 標籤 + 未分類
     f_c1, f_c2 = st.columns([1, 2])
     with f_c1:
         filter_album = st.selectbox("📂 相簿", ["全部"] + existing_albums)
@@ -177,7 +183,7 @@ if page_mode == "📸 相簿瀏覽":
     with f_c2:
         tag_col1, tag_col2 = st.columns([3, 1])
         with tag_col1:
-            filter_tags = st.multiselect("🏷️ 標籤篩選", existing_tags, disabled=False)
+            filter_tags = st.multiselect("🏷️ 標籤篩選", existing_tags)
         with tag_col2:
             st.write("") 
             st.write("") 
@@ -248,14 +254,15 @@ if page_mode == "📸 相簿瀏覽":
         cols = st.columns(num_columns)
         for idx, photo in enumerate(filtered_photos):
             with cols[idx % num_columns]:
+                # 顯示縮圖
                 st.image(photo['url'], use_container_width=True)
                 
                 # 按鈕與勾選框
                 btn_col, check_col = st.columns([1, 4]) 
                 
                 with btn_col:
-                    # 點擊後會觸發 image_zoom 的彈出視窗
-                    if st.button("🔍", key=f"zoom_{photo['public_id']}", help="點擊放大圖片"):
+                    # 點擊後觸發原生彈出視窗
+                    if st.button("🔍", key=f"zoom_{photo['public_id']}", help="查看大圖"):
                         show_large_image(photo)
                 
                 with check_col:
