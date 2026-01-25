@@ -12,7 +12,7 @@ from PIL import Image
 
 # 設定網頁標題
 st.set_page_config(page_title="雲端圖庫 Ultimate", layout="wide")
-st.title("☁️ 雲端圖庫 (顯示檔案大小版)")
+st.title("☁️ 雲端圖庫 (最終修復版)")
 
 # --- 1. Cloudinary 連線設定 ---
 if "cloudinary" in st.secrets:
@@ -42,15 +42,18 @@ inject_custom_css()
 
 # --- 3. 核心功能函數 ---
 
-# [新增] 檔案大小轉換小工具 (Bytes -> KB/MB)
+# 檔案大小轉換
 def format_file_size(size_in_bytes):
-    if not size_in_bytes: return "未知"
+    # 如果是 0 或 None，回傳提示
+    if not size_in_bytes: return "未知 (舊圖)"
+    
     for unit in ['B', 'KB', 'MB', 'GB']:
         if size_in_bytes < 1024:
             return f"{size_in_bytes:.1f} {unit}"
         size_in_bytes /= 1024
     return f"{size_in_bytes:.1f} GB"
 
+# 圖片壓縮
 def compress_image(image_file):
     try:
         img = Image.open(image_file)
@@ -93,8 +96,8 @@ def load_db():
             for item in data:
                 item['date'] = datetime.datetime.strptime(item['date_str'], "%Y-%m-%d").date()
                 if 'album' not in item: item['album'] = "未分類"
-                # [相容性處理] 如果舊照片沒有 size 欄位，預設為 0
-                if 'size' not in item: item['size'] = 0 
+                # [相容性] 舊資料沒有 size，補上 0
+                if 'size' not in item: item['size'] = 0
             return data
         else: return []
     except: return []
@@ -106,7 +109,7 @@ def save_db(data):
             "public_id": item['public_id'], "url": item['url'], "name": item['name'],
             "date_str": item['date'].strftime("%Y-%m-%d"), "tags": item['tags'],
             "album": item.get('album', '未分類'),
-            "size": item.get('size', 0) # [新增] 儲存檔案大小
+            "size": item.get('size', 0)
         })
     json_str = json.dumps(save_list, ensure_ascii=False, indent=4)
     cloudinary.uploader.upload(
@@ -117,11 +120,15 @@ def save_db(data):
 def delete_image_from_cloud(public_id):
     cloudinary.uploader.destroy(public_id)
 
+# [重要修正] 清除選取的回呼函式 (Callback)
+# 這個函數必須在 UI 渲染前定義好
 def clear_all_selections():
+    # 遍歷所有的 session_state，把 sel_ 開頭的都設為 False
     for key in st.session_state.keys():
-        if key.startswith("sel_"): st.session_state[key] = False
+        if key.startswith("sel_"):
+            st.session_state[key] = False
 
-# [已修改] 顯示大圖視窗 (包含檔案大小)
+# 大圖視窗
 @st.dialog("📸 照片詳情", width="large")
 def show_large_image(photo):
     st.image(photo['url'], use_container_width=True)
@@ -129,12 +136,11 @@ def show_large_image(photo):
     
     st.markdown(f"**檔名**: {photo['name']}")
     
-    c1, c2, c3 = st.columns(3) # 改成三欄
+    c1, c2, c3 = st.columns(3)
     with c1:
         st.write(f"📅 **日期**: {photo['date']}")
         st.write(f"📂 **相簿**: {photo['album']}")
     with c2:
-        # [新增] 顯示檔案大小
         file_size_str = format_file_size(photo.get('size', 0))
         st.write(f"📏 **大小**: {file_size_str}")
         
@@ -184,17 +190,15 @@ with st.sidebar:
                 try:
                     # 1. 壓縮
                     compressed_file = compress_image(f)
-                    
-                    # [核心修改] 2. 計算壓縮後的檔案大小 (Bytes)
+                    # 2. 獲取壓縮後大小
                     file_size_bytes = compressed_file.getbuffer().nbytes
-                    
                     # 3. 上傳
                     res = cloudinary.uploader.upload(compressed_file)
                     
                     try: d = datetime.datetime.strptime(f.name[:8], "%Y%m%d").date()
                     except: d = datetime.date.today()
                     
-                    # 4. 存入資料庫 (加入 size 欄位)
+                    # 4. 存檔 (包含 size)
                     st.session_state.gallery.append({
                         "public_id": res['public_id'], "url": res['secure_url'], 
                         "name": f.name, "date": d, "tags": [], "album": current_album,
@@ -283,7 +287,6 @@ if page_mode == "📸 相簿瀏覽":
                     if key not in st.session_state: st.session_state[key] = False
                     is_selected = st.checkbox(f"{photo['name']}", key=key)
                 
-                # [UI修改] 顯示檔案大小
                 tags_str = f"🏷️ {','.join(photo['tags'])}" if photo['tags'] else "❌ 未分類"
                 size_str = format_file_size(photo.get('size', 0))
                 st.caption(f"{tags_str} | 📏 {size_str}")
@@ -316,7 +319,11 @@ if page_mode == "📸 相簿瀏覽":
                 time.sleep(1)
                 st.rerun()
         st.write("") 
-        st.button("❎ 取消所有選取 (離開編輯模式)", use_container_width=True, on_click=clear_all_selections) 
+        
+        # [重點修復] 這裡使用 on_click 參數，避免報錯
+        st.button("❎ 取消所有選取 (離開編輯模式)", 
+                  use_container_width=True, 
+                  on_click=clear_all_selections) 
 
 else:
     st.header("📊 數據統計中心")
@@ -334,7 +341,6 @@ else:
         m1.metric("📸 總照片數", len(st.session_state.gallery))
         m2.metric("❌ 未分類", len([p for p in st.session_state.gallery if not p['tags']]), delta_color="inverse")
         
-        # [新增] 計算總容量使用量
         total_size_bytes = sum([p.get('size', 0) for p in st.session_state.gallery])
         m3.metric("💾 雲端空間使用", format_file_size(total_size_bytes))
         
