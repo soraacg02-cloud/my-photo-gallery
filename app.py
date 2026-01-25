@@ -8,11 +8,11 @@ import cloudinary.api
 from io import BytesIO
 import time
 import pandas as pd
-from PIL import Image # [新增] 引入圖片處理套件
+from PIL import Image
 
 # 設定網頁標題
 st.set_page_config(page_title="雲端圖庫 Ultimate", layout="wide")
-st.title("☁️ 雲端圖庫 (自動壓縮優化版)")
+st.title("☁️ 雲端圖庫 (顯示檔案大小版)")
 
 # --- 1. Cloudinary 連線設定 ---
 if "cloudinary" in st.secrets:
@@ -42,51 +42,43 @@ inject_custom_css()
 
 # --- 3. 核心功能函數 ---
 
-# [新增功能] 圖片自動壓縮大師
+# [新增] 檔案大小轉換小工具 (Bytes -> KB/MB)
+def format_file_size(size_in_bytes):
+    if not size_in_bytes: return "未知"
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size_in_bytes < 1024:
+            return f"{size_in_bytes:.1f} {unit}"
+        size_in_bytes /= 1024
+    return f"{size_in_bytes:.1f} GB"
+
 def compress_image(image_file):
-    """
-    接收一個圖片檔案，進行 resize 和壓縮，
-    回傳一個縮小後的 BytesIO 物件。
-    """
     try:
-        # 1. 打開圖片
         img = Image.open(image_file)
-        
-        # 2. 處理因手機拍攝方向(EXIF)導致的旋轉問題
         try:
-            from PIL import ExifTags, ImageOps
+            from PIL import ExifTags
             for orientation in ExifTags.TAGS.keys():
-                if ExifTags.TAGS[orientation] == 'Orientation':
-                    break
+                if ExifTags.TAGS[orientation] == 'Orientation': break
             exif = img._getexif()
             if exif is not None:
                 orientation = exif.get(orientation)
                 if orientation == 3: img = img.rotate(180, expand=True)
                 elif orientation == 6: img = img.rotate(270, expand=True)
                 elif orientation == 8: img = img.rotate(90, expand=True)
-        except:
-            pass # 如果沒有 EXIF 資訊就不處理
+        except: pass
 
-        # 3. 調整尺寸 (如果寬度超過 1920，就等比例縮小)
         max_width = 1920
         if img.width > max_width:
             ratio = max_width / img.width
             new_height = int(img.height * ratio)
             img = img.resize((max_width, new_height), Image.Resampling.LANCZOS)
         
-        # 4. 轉換格式 (統一轉為 RGB 模式，避免 PNG 透明度在轉 JPEG 時變黑)
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
+        if img.mode in ("RGBA", "P"): img = img.convert("RGB")
             
-        # 5. 壓縮存入記憶體
         output_buffer = BytesIO()
-        # quality=80 是平衡畫質與檔案大小的最佳甜蜜點
         img.save(output_buffer, format="JPEG", quality=80, optimize=True)
-        output_buffer.seek(0) # 指針歸零，準備讓上傳程式讀取
-        
+        output_buffer.seek(0)
         return output_buffer
     except Exception as e:
-        # 如果壓縮失敗，就回傳原始檔案，並印出錯誤
         print(f"壓縮失敗: {e}")
         image_file.seek(0)
         return image_file
@@ -101,6 +93,8 @@ def load_db():
             for item in data:
                 item['date'] = datetime.datetime.strptime(item['date_str'], "%Y-%m-%d").date()
                 if 'album' not in item: item['album'] = "未分類"
+                # [相容性處理] 如果舊照片沒有 size 欄位，預設為 0
+                if 'size' not in item: item['size'] = 0 
             return data
         else: return []
     except: return []
@@ -111,7 +105,8 @@ def save_db(data):
         save_list.append({
             "public_id": item['public_id'], "url": item['url'], "name": item['name'],
             "date_str": item['date'].strftime("%Y-%m-%d"), "tags": item['tags'],
-            "album": item.get('album', '未分類')
+            "album": item.get('album', '未分類'),
+            "size": item.get('size', 0) # [新增] 儲存檔案大小
         })
     json_str = json.dumps(save_list, ensure_ascii=False, indent=4)
     cloudinary.uploader.upload(
@@ -124,23 +119,30 @@ def delete_image_from_cloud(public_id):
 
 def clear_all_selections():
     for key in st.session_state.keys():
-        if key.startswith("sel_"):
-            st.session_state[key] = False
+        if key.startswith("sel_"): st.session_state[key] = False
 
-# 原生穩定版大圖
+# [已修改] 顯示大圖視窗 (包含檔案大小)
 @st.dialog("📸 照片詳情", width="large")
 def show_large_image(photo):
     st.image(photo['url'], use_container_width=True)
     st.divider()
+    
     st.markdown(f"**檔名**: {photo['name']}")
-    c1, c2 = st.columns(2)
+    
+    c1, c2, c3 = st.columns(3) # 改成三欄
     with c1:
         st.write(f"📅 **日期**: {photo['date']}")
         st.write(f"📂 **相簿**: {photo['album']}")
     with c2:
+        # [新增] 顯示檔案大小
+        file_size_str = format_file_size(photo.get('size', 0))
+        st.write(f"📏 **大小**: {file_size_str}")
+        
+    with c3:
         if photo['tags']: st.write(f"🏷️ **標籤**: {', '.join(photo['tags'])}")
         else: st.write("🏷️ **標籤**: (無)")
-    st.download_button(label="⬇️ 下載原始圖檔", data=requests.get(photo['url']).content, file_name=photo['name'], mime="image/jpeg", use_container_width=True)
+        
+    st.download_button(label="⬇️ 下載圖檔", data=requests.get(photo['url']).content, file_name=photo['name'], mime="image/jpeg", use_container_width=True)
 
 
 # --- 4. 應用程式主邏輯 ---
@@ -156,7 +158,7 @@ existing_tags = sorted(list(set([tag for item in st.session_state.gallery for ta
 DEFAULT_TAGS = ["彩色", "線稿", "單人", "雙人"]
 ALL_TAG_OPTIONS = sorted(list(set(DEFAULT_TAGS + existing_tags)))
 
-# === 側邊欄：功能選單與上傳 ===
+# === 側邊欄 ===
 with st.sidebar:
     st.header("功能選單")
     page_mode = st.radio("前往頁面", ["📸 相簿瀏覽", "📊 數據統計"])
@@ -175,38 +177,41 @@ with st.sidebar:
         if not current_album: st.error("請輸入相簿名稱")
         else:
             progress = st.progress(0)
-            status_text = st.empty() # 顯示目前處理進度
+            status_text = st.empty()
             
             for i, f in enumerate(uploaded_files):
-                status_text.text(f"正在處理第 {i+1}/{len(uploaded_files)} 張：{f.name} (壓縮中...)")
-                
+                status_text.text(f"處理中 {i+1}/{len(uploaded_files)}：{f.name} (壓縮中...)")
                 try:
-                    # [核心修改] 上傳前先進行壓縮
+                    # 1. 壓縮
                     compressed_file = compress_image(f)
                     
-                    # 上傳到 Cloudinary
+                    # [核心修改] 2. 計算壓縮後的檔案大小 (Bytes)
+                    file_size_bytes = compressed_file.getbuffer().nbytes
+                    
+                    # 3. 上傳
                     res = cloudinary.uploader.upload(compressed_file)
                     
                     try: d = datetime.datetime.strptime(f.name[:8], "%Y%m%d").date()
                     except: d = datetime.date.today()
                     
+                    # 4. 存入資料庫 (加入 size 欄位)
                     st.session_state.gallery.append({
                         "public_id": res['public_id'], "url": res['secure_url'], 
-                        "name": f.name, "date": d, "tags": [], "album": current_album
+                        "name": f.name, "date": d, "tags": [], "album": current_album,
+                        "size": file_size_bytes 
                     })
                 except Exception as e:
-                    # [修正] 顯示明確的錯誤訊息，而不是 pass 過去
-                    st.error(f"❌ 照片 {f.name} 上傳失敗。原因：{e}")
+                    st.error(f"❌ {f.name} 上傳失敗: {e}")
                 
                 progress.progress((i+1)/len(uploaded_files))
             
-            status_text.text("儲存資料庫中...")
+            status_text.text("儲存資料庫...")
             save_db(st.session_state.gallery)
             st.success("完成！")
             time.sleep(1)
             st.rerun()
 
-# === 頁面邏輯分流 ===
+# === 頁面分流 ===
 
 if page_mode == "📸 相簿瀏覽":
     st.subheader("🔍 瀏覽設定")
@@ -218,7 +223,7 @@ if page_mode == "📸 相簿瀏覽":
         with tag_col2:
             st.write("") 
             st.write("") 
-            show_untagged = st.checkbox("只看未分類", help("勾選後，將只顯示沒有任何標籤的圖片"))
+            show_untagged = st.checkbox("只看未分類", help("只顯示無標籤圖片"))
 
     f_c3, f_c4, f_c5 = st.columns([2, 1, 1]) 
     with f_c3: sort_option = st.selectbox("🔃 排序方式", ["日期 (新→舊)", "日期 (舊→新)", "檔名 (A→Z)", "檔名 (Z→A)", "標籤 (A→Z)"], index=0)
@@ -234,12 +239,10 @@ if page_mode == "📸 相簿瀏覽":
         match_album = (filter_album == "全部") or (p['album'] == filter_album)
         match_year = (filter_year == "全部") or (p['date'].year == filter_year)
         match_month = (filter_month == "全部") or (p['date'].month == filter_month)
-        
         if show_untagged: match_tags = (len(p['tags']) == 0)
         else:
             match_tags = True
             if filter_tags: match_tags = all(tag in p['tags'] for tag in filter_tags)
-        
         if match_album and match_year and match_month and match_tags: filtered_photos.append(p)
 
     if sort_option == "日期 (舊→新)": filtered_photos.sort(key=lambda x: x['date']) 
@@ -279,8 +282,12 @@ if page_mode == "📸 相簿瀏覽":
                     key = f"sel_{photo['public_id']}"
                     if key not in st.session_state: st.session_state[key] = False
                     is_selected = st.checkbox(f"{photo['name']}", key=key)
-                if photo['tags']: st.caption(f"🏷️ {','.join(photo['tags'])}")
-                else: st.caption("❌ 未分類") 
+                
+                # [UI修改] 顯示檔案大小
+                tags_str = f"🏷️ {','.join(photo['tags'])}" if photo['tags'] else "❌ 未分類"
+                size_str = format_file_size(photo.get('size', 0))
+                st.caption(f"{tags_str} | 📏 {size_str}")
+                
                 if num_columns == 1: st.text(f"相簿: {photo['album']} | 日期: {photo['date']}")
                 st.write("") 
                 if is_selected: selected_photos.append(photo)
@@ -313,30 +320,26 @@ if page_mode == "📸 相簿瀏覽":
 
 else:
     st.header("📊 數據統計中心")
-    st.write("查看您每個月的創作產量統計")
-    if not st.session_state.gallery: st.info("目前還沒有照片，請先上傳！")
+    st.write("查看每個月的創作產量")
+    if not st.session_state.gallery: st.info("無資料")
     else:
         stats_data = {} 
         for p in st.session_state.gallery:
-            y = p['date'].year
-            m = p['date'].month
-            key = (y, m)
-            if key in stats_data: stats_data[key] += 1
-            else: stats_data[key] = 1
-        df_list = []
-        for (year, month), count in stats_data.items():
-            df_list.append({"年份": year, "月份": month, "數量 (張)": count, "年月標籤": f"{year}-{month:02d}"})
-        df = pd.DataFrame(df_list)
-        df = df.sort_values(by=["年份", "月份"], ascending=False)
-        total_photos = len(st.session_state.gallery)
-        untagged_count = len([p for p in st.session_state.gallery if not p['tags']])
+            key = (p['date'].year, p['date'].month)
+            stats_data[key] = stats_data.get(key, 0) + 1
+        df_list = [{"年份": y, "月份": m, "數量 (張)": c, "年月": f"{y}-{m:02d}"} for (y, m), c in stats_data.items()]
+        df = pd.DataFrame(df_list).sort_values(by=["年份", "月份"], ascending=False)
+        
         m1, m2, m3 = st.columns(3)
-        m1.metric("📸 總照片數", total_photos)
-        m2.metric("❌ 未分類照片", untagged_count, delta_color="inverse")
-        m3.metric("📅 統計月份數", len(df))
+        m1.metric("📸 總照片數", len(st.session_state.gallery))
+        m2.metric("❌ 未分類", len([p for p in st.session_state.gallery if not p['tags']]), delta_color="inverse")
+        
+        # [新增] 計算總容量使用量
+        total_size_bytes = sum([p.get('size', 0) for p in st.session_state.gallery])
+        m3.metric("💾 雲端空間使用", format_file_size(total_size_bytes))
+        
         st.divider()
-        st.subheader("📈 每月上傳趨勢")
-        chart_data = df.set_index("年月標籤")[["數量 (張)"]]
-        st.bar_chart(chart_data, color="#ff4b4b")
-        st.subheader("📋 詳細數據表")
+        st.subheader("📈 每月趨勢")
+        st.bar_chart(df.set_index("年月")[["數量 (張)"]], color="#ff4b4b")
+        st.subheader("📋 詳細數據")
         st.dataframe(df[["年份", "月份", "數量 (張)"]], use_container_width=True, hide_index=True)
