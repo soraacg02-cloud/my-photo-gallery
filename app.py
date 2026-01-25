@@ -12,7 +12,7 @@ from PIL import Image
 
 # 設定網頁標題
 st.set_page_config(page_title="雲端圖庫 Ultimate", layout="wide")
-st.title("☁️ 雲端圖庫 (最終修復版)")
+st.title("☁️ 雲端圖庫 (統計報表升級版)")
 
 # --- 1. Cloudinary 連線設定 ---
 if "cloudinary" in st.secrets:
@@ -42,18 +42,14 @@ inject_custom_css()
 
 # --- 3. 核心功能函數 ---
 
-# 檔案大小轉換
 def format_file_size(size_in_bytes):
-    # 如果是 0 或 None，回傳提示
-    if not size_in_bytes: return "未知 (舊圖)"
-    
+    if not size_in_bytes: return "未知"
     for unit in ['B', 'KB', 'MB', 'GB']:
         if size_in_bytes < 1024:
             return f"{size_in_bytes:.1f} {unit}"
         size_in_bytes /= 1024
     return f"{size_in_bytes:.1f} GB"
 
-# 圖片壓縮
 def compress_image(image_file):
     try:
         img = Image.open(image_file)
@@ -96,7 +92,6 @@ def load_db():
             for item in data:
                 item['date'] = datetime.datetime.strptime(item['date_str'], "%Y-%m-%d").date()
                 if 'album' not in item: item['album'] = "未分類"
-                # [相容性] 舊資料沒有 size，補上 0
                 if 'size' not in item: item['size'] = 0
             return data
         else: return []
@@ -120,15 +115,12 @@ def save_db(data):
 def delete_image_from_cloud(public_id):
     cloudinary.uploader.destroy(public_id)
 
-# [重要修正] 清除選取的回呼函式 (Callback)
-# 這個函數必須在 UI 渲染前定義好
+# [重要修復] 使用 callback 來清除選取，解決 StreamlitAPIException
 def clear_all_selections():
-    # 遍歷所有的 session_state，把 sel_ 開頭的都設為 False
     for key in st.session_state.keys():
         if key.startswith("sel_"):
             st.session_state[key] = False
 
-# 大圖視窗
 @st.dialog("📸 照片詳情", width="large")
 def show_large_image(photo):
     st.image(photo['url'], use_container_width=True)
@@ -188,17 +180,13 @@ with st.sidebar:
             for i, f in enumerate(uploaded_files):
                 status_text.text(f"處理中 {i+1}/{len(uploaded_files)}：{f.name} (壓縮中...)")
                 try:
-                    # 1. 壓縮
                     compressed_file = compress_image(f)
-                    # 2. 獲取壓縮後大小
                     file_size_bytes = compressed_file.getbuffer().nbytes
-                    # 3. 上傳
                     res = cloudinary.uploader.upload(compressed_file)
                     
                     try: d = datetime.datetime.strptime(f.name[:8], "%Y%m%d").date()
                     except: d = datetime.date.today()
                     
-                    # 4. 存檔 (包含 size)
                     st.session_state.gallery.append({
                         "public_id": res['public_id'], "url": res['secure_url'], 
                         "name": f.name, "date": d, "tags": [], "album": current_album,
@@ -320,32 +308,66 @@ if page_mode == "📸 相簿瀏覽":
                 st.rerun()
         st.write("") 
         
-        # [重點修復] 這裡使用 on_click 參數，避免報錯
+        # [修復] 使用 on_click 參數，避免 StreamlitAPIException
         st.button("❎ 取消所有選取 (離開編輯模式)", 
                   use_container_width=True, 
                   on_click=clear_all_selections) 
 
 else:
+    # -----------------------------------------------------------
+    #  [全新統計頁面] 樞紐分析表 (Pivot Table) 邏輯
+    # -----------------------------------------------------------
     st.header("📊 數據統計中心")
     st.write("查看每個月的創作產量")
-    if not st.session_state.gallery: st.info("無資料")
+
+    if not st.session_state.gallery:
+        st.info("無資料，請先上傳照片！")
     else:
-        stats_data = {} 
-        for p in st.session_state.gallery:
-            key = (p['date'].year, p['date'].month)
-            stats_data[key] = stats_data.get(key, 0) + 1
-        df_list = [{"年份": y, "月份": m, "數量 (張)": c, "年月": f"{y}-{m:02d}"} for (y, m), c in stats_data.items()]
-        df = pd.DataFrame(df_list).sort_values(by=["年份", "月份"], ascending=False)
+        # 1. 顯示 KPI 指標
+        total_photos = len(st.session_state.gallery)
+        untagged_count = len([p for p in st.session_state.gallery if not p['tags']])
+        total_size_bytes = sum([p.get('size', 0) for p in st.session_state.gallery])
         
         m1, m2, m3 = st.columns(3)
-        m1.metric("📸 總照片數", len(st.session_state.gallery))
-        m2.metric("❌ 未分類", len([p for p in st.session_state.gallery if not p['tags']]), delta_color="inverse")
-        
-        total_size_bytes = sum([p.get('size', 0) for p in st.session_state.gallery])
-        m3.metric("💾 雲端空間使用", format_file_size(total_size_bytes))
+        m1.metric("📸 總照片數", total_photos)
+        m2.metric("❌ 未分類", untagged_count, delta_color="inverse")
+        m3.metric("💾 空間使用", format_file_size(total_size_bytes))
         
         st.divider()
-        st.subheader("📈 每月趨勢")
-        st.bar_chart(df.set_index("年月")[["數量 (張)"]], color="#ff4b4b")
-        st.subheader("📋 詳細數據")
-        st.dataframe(df[["年份", "月份", "數量 (張)"]], use_container_width=True, hide_index=True)
+        
+        # 2. 製作樞紐分析表 (Pivot Table)
+        # 先把資料整理成簡單的 List
+        raw_data = []
+        for p in st.session_state.gallery:
+            raw_data.append({
+                "Year": p['date'].year,
+                "Month": p['date'].month
+            })
+            
+        if raw_data:
+            df = pd.DataFrame(raw_data)
+            
+            # 使用 crosstab 計算交叉頻率 (Row=Month, Col=Year)
+            pivot_df = pd.crosstab(df['Month'], df['Year'])
+            
+            # 確保 1~12 月都有顯示 (即使該月沒照片)
+            all_months = list(range(1, 13))
+            pivot_df = pivot_df.reindex(all_months, fill_value=0)
+            
+            # 加入「總計」列 (Row Total)
+            pivot_df.loc['總計'] = pivot_df.sum()
+            
+            # 將索引名稱改成中文 "月份"
+            pivot_df.index.name = "月份"
+            
+            st.subheader("🗓️ 年度月別統計表")
+            # 顯示表格，並自動撐開寬度
+            st.dataframe(pivot_df, use_container_width=True)
+            
+            # 額外畫圖：每年的總產量趨勢
+            st.subheader("📈 年度產量比較")
+            # 排除掉 "總計" 那一列來畫圖
+            chart_data = pivot_df.drop('總計')
+            st.bar_chart(chart_data)
+        else:
+            st.warning("目前沒有足夠的資料來產生報表。")
