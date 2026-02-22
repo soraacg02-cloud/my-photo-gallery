@@ -12,7 +12,7 @@ from PIL import Image
 
 # 設定網頁標題
 st.set_page_config(page_title="雲端圖庫 Ultimate", layout="wide")
-st.title("☁️ 雲端圖庫 (統計報表升級版)")
+st.title("☁️ 雲端圖庫 (分類統計升級版)")
 
 # --- 1. Cloudinary 連線設定 ---
 if "cloudinary" in st.secrets:
@@ -115,7 +115,6 @@ def save_db(data):
 def delete_image_from_cloud(public_id):
     cloudinary.uploader.destroy(public_id)
 
-# [重要修復] 使用 callback 來清除選取，解決 StreamlitAPIException
 def clear_all_selections():
     for key in st.session_state.keys():
         if key.startswith("sel_"):
@@ -142,13 +141,11 @@ def show_large_image(photo):
         
     st.download_button(label="⬇️ 下載圖檔", data=requests.get(photo['url']).content, file_name=photo['name'], mime="image/jpeg", use_container_width=True)
 
-
 # --- 4. 應用程式主邏輯 ---
 if 'gallery' not in st.session_state:
     with st.spinner('載入資料庫...'):
         st.session_state.gallery = load_db()
 
-# 資料整理
 existing_albums = sorted(list(set([item['album'] for item in st.session_state.gallery])))
 if "未分類" not in existing_albums: existing_albums.append("未分類")
 
@@ -307,67 +304,67 @@ if page_mode == "📸 相簿瀏覽":
                 time.sleep(1)
                 st.rerun()
         st.write("") 
-        
-        # [修復] 使用 on_click 參數，避免 StreamlitAPIException
-        st.button("❎ 取消所有選取 (離開編輯模式)", 
-                  use_container_width=True, 
-                  on_click=clear_all_selections) 
+        st.button("❎ 取消所有選取 (離開編輯模式)", use_container_width=True, on_click=clear_all_selections) 
 
 else:
     # -----------------------------------------------------------
-    #  [全新統計頁面] 樞紐分析表 (Pivot Table) 邏輯
+    #  [統計頁面] 新增相簿切換功能
     # -----------------------------------------------------------
     st.header("📊 數據統計中心")
-    st.write("查看每個月的創作產量")
+    st.write("查看不同相簿或整體的創作產量")
 
     if not st.session_state.gallery:
         st.info("無資料，請先上傳照片！")
     else:
-        # 1. 顯示 KPI 指標
-        total_photos = len(st.session_state.gallery)
-        untagged_count = len([p for p in st.session_state.gallery if not p['tags']])
-        total_size_bytes = sum([p.get('size', 0) for p in st.session_state.gallery])
+        # [核心新增] 提供使用者選擇想統計的相簿
+        stat_album = st.selectbox("📂 選擇要統計的相簿", ["全部"] + existing_albums)
         
-        m1, m2, m3 = st.columns(3)
-        m1.metric("📸 總照片數", total_photos)
-        m2.metric("❌ 未分類", untagged_count, delta_color="inverse")
-        m3.metric("💾 空間使用", format_file_size(total_size_bytes))
-        
-        st.divider()
-        
-        # 2. 製作樞紐分析表 (Pivot Table)
-        # 先把資料整理成簡單的 List
-        raw_data = []
-        for p in st.session_state.gallery:
-            raw_data.append({
-                "Year": p['date'].year,
-                "Month": p['date'].month
-            })
-            
-        if raw_data:
-            df = pd.DataFrame(raw_data)
-            
-            # 使用 crosstab 計算交叉頻率 (Row=Month, Col=Year)
-            pivot_df = pd.crosstab(df['Month'], df['Year'])
-            
-            # 確保 1~12 月都有顯示 (即使該月沒照片)
-            all_months = list(range(1, 13))
-            pivot_df = pivot_df.reindex(all_months, fill_value=0)
-            
-            # 加入「總計」列 (Row Total)
-            pivot_df.loc['總計'] = pivot_df.sum()
-            
-            # 將索引名稱改成中文 "月份"
-            pivot_df.index.name = "月份"
-            
-            st.subheader("🗓️ 年度月別統計表")
-            # 顯示表格，並自動撐開寬度
-            st.dataframe(pivot_df, use_container_width=True)
-            
-            # 額外畫圖：每年的總產量趨勢
-            st.subheader("📈 年度產量比較")
-            # 排除掉 "總計" 那一列來畫圖
-            chart_data = pivot_df.drop('總計')
-            st.bar_chart(chart_data)
+        # 根據選擇過濾出要計算的圖片 (Data Filtering)
+        if stat_album == "全部":
+            stat_photos = st.session_state.gallery
         else:
-            st.warning("目前沒有足夠的資料來產生報表。")
+            stat_photos = [p for p in st.session_state.gallery if p['album'] == stat_album]
+
+        if not stat_photos:
+            st.warning(f"相簿 '{stat_album}' 裡面目前沒有照片喔！")
+        else:
+            # 1. 顯示 KPI 指標 (現在是根據過濾後的 stat_photos 來算)
+            total_photos = len(stat_photos)
+            untagged_count = len([p for p in stat_photos if not p['tags']])
+            total_size_bytes = sum([p.get('size', 0) for p in stat_photos])
+            
+            m1, m2, m3 = st.columns(3)
+            m1.metric("📸 照片數", total_photos)
+            m2.metric("❌ 未分類", untagged_count, delta_color="inverse")
+            m3.metric("💾 空間使用", format_file_size(total_size_bytes))
+            
+            st.divider()
+            
+            # 2. 製作樞紐分析表 (Pivot Table)
+            raw_data = []
+            for p in stat_photos: # 這裡改用 stat_photos
+                raw_data.append({
+                    "Year": p['date'].year,
+                    "Month": p['date'].month
+                })
+                
+            if raw_data:
+                df = pd.DataFrame(raw_data)
+                
+                # 計算交叉頻率 (Row=Month, Col=Year)
+                pivot_df = pd.crosstab(df['Month'], df['Year'])
+                
+                # 確保 1~12 月都有顯示
+                all_months = list(range(1, 13))
+                pivot_df = pivot_df.reindex(all_months, fill_value=0)
+                
+                # 加入「總計」列
+                pivot_df.loc['總計'] = pivot_df.sum()
+                pivot_df.index.name = "月份"
+                
+                st.subheader(f"🗓️ 年度月別統計表 ({stat_album})")
+                st.dataframe(pivot_df, use_container_width=True)
+                
+                st.subheader(f"📈 年度產量比較 ({stat_album})")
+                chart_data = pivot_df.drop('總計')
+                st.bar_chart(chart_data)
