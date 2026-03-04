@@ -10,13 +10,27 @@ import time
 import pandas as pd
 from PIL import Image
 
-# --- 1. 頁面配置 (必須放在程式碼的最上方) ---
+# --- 1. 頁面配置 (必須放在最上方) ---
 st.set_page_config(
-    page_title="我的花瓣相簿",    # 手機加入主畫面時預設的標題
-    page_icon="🌸",              # 櫻花 Icon
-    layout="wide",               # 寬螢幕佈局
+    page_title="我的花瓣相簿",    
+    page_icon="🌸",              
+    layout="wide",               
     initial_sidebar_state="expanded"
 )
+
+# --- [進階魔法] 強制設定手機主畫面圖示 ---
+def inject_mobile_icon():
+    # 這是一張真實的高畫質櫻花圖片網址
+    icon_url = "https://img.icons8.com/color/512/cherry-blossom.png"
+    
+    # 偷偷塞入 HTML 標籤，告訴手機系統：「這才是真正的 App 圖示！」
+    st.markdown(f"""
+        <link rel="apple-touch-icon" href="{icon_url}">
+        <link rel="icon" sizes="192x192" href="{icon_url}">
+    """, unsafe_allow_html=True)
+
+# 呼叫圖示魔法
+inject_mobile_icon()
 
 st.title("🌸 我的私人照片庫")
 
@@ -31,7 +45,7 @@ if "cloudinary" in st.secrets:
 
 DB_FILENAME = "photo_db_v2.json"
 
-# --- 3. CSS 強力修正 (手機雙欄網格 + 按鈕優化) ---
+# --- 3. CSS 強力修正 ---
 def inject_custom_css():
     st.markdown("""
     <style>
@@ -161,8 +175,6 @@ ALL_TAG_OPTIONS = sorted(list(set(DEFAULT_TAGS + existing_tags)))
 # === 側邊欄 ===
 with st.sidebar:
     st.header("🌸 功能選單")
-    
-    # [新增] 將加入主畫面的提示文字完美融入側邊欄
     st.info("💡 提示：點擊瀏覽器選單的『加入主畫面』，即可在手機桌面建立櫻花圖標捷徑喔！")
     
     page_mode = st.radio("前往頁面", ["📸 相簿瀏覽", "📊 數據統計"])
