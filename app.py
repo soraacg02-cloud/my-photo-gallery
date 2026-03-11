@@ -150,7 +150,9 @@ existing_albums = sorted(list(set([item['album'] for item in st.session_state.ga
 if "未分類" not in existing_albums: existing_albums.append("未分類")
 
 existing_tags = sorted(list(set([tag for item in st.session_state.gallery for tag in item['tags']])))
-DEFAULT_TAGS = ["彩色", "線稿", "單人", "雙人"]
+
+# [修改處] 這裡新增了「無償」與「非無償」
+DEFAULT_TAGS = ["彩色", "線稿", "單人", "雙人", "無償", "非無償"]
 ALL_TAG_OPTIONS = sorted(list(set(DEFAULT_TAGS + existing_tags)))
 
 # === 側邊欄 ===
