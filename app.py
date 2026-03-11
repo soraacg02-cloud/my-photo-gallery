@@ -175,7 +175,9 @@ existing_albums = sorted(list(set([item['album'] for item in st.session_state.ga
 if "未分類" not in existing_albums: existing_albums.append("未分類")
 
 existing_tags = sorted(list(set([tag for item in st.session_state.gallery for tag in item['tags']])))
-DEFAULT_TAGS = ["彩色", "線稿", "單人", "雙人", "無償", "非無償"]
+
+# --- [修改重點] 這裡新增了「人物」與「風景」 ---
+DEFAULT_TAGS = ["彩色", "線稿", "單人", "雙人", "無償", "非無償", "人物", "風景"]
 ALL_TAG_OPTIONS = sorted(list(set(DEFAULT_TAGS + existing_tags)))
 
 # === 側邊欄 ===
@@ -293,24 +295,20 @@ if page_mode == "📸 相簿瀏覽":
             
     st.divider()
 
-    # --- [核心修改] 照片展示區：原生列排版 ---
+    # --- 照片展示區：原生列排版 ---
     selected_photos = [] 
     if filtered_photos:
-        # 將畫廊放入獨立容器，並標上隱形標記供手機版 CSS 抓取
         with st.container():
             st.markdown('<div class="gallery-marker" style="display:none;"></div>', unsafe_allow_html=True)
             
-            # 電腦版：使用穩定的原生 st.columns(3)，每 3 張圖為一列
             for i in range(0, len(filtered_photos), 3):
-                cols = st.columns(3) # 每次建立 3 個欄位
+                cols = st.columns(3) 
                 
-                # 將照片依序放入這 3 個欄位中
                 for j in range(3):
                     if i + j < len(filtered_photos):
                         photo = filtered_photos[i + j]
                         
                         with cols[j]:
-                            # 卡片式設計 (border=True)
                             with st.container(border=True):
                                 st.image(photo['url'], use_container_width=True)
                                 
