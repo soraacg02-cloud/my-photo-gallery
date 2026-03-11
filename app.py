@@ -12,7 +12,7 @@ from PIL import Image
 
 # 設定網頁標題
 st.set_page_config(page_title="雲端圖庫 Ultimate", layout="wide")
-st.title("☁️ 雲端圖庫 (分類統計升級版)")
+st.title("☁️ 雲端圖庫 (手機排版優化版)")
 
 # --- 1. Cloudinary 連線設定 ---
 if "cloudinary" in st.secrets:
@@ -25,16 +25,12 @@ if "cloudinary" in st.secrets:
 
 DB_FILENAME = "photo_db_v2.json"
 
-# --- 2. CSS 強力修正 ---
+# --- 2. CSS 微調 (移除會導致按鈕破版的強制網格) ---
 def inject_custom_css():
     st.markdown("""
     <style>
-    span[data-baseweb="tag"] { background-color: #ff4b4b !important; }
-    @media (max-width: 640px) {
-        [data-testid="column"] { width: 50% !important; flex: 1 1 50% !important; min-width: 50% !important; }
-        [data-testid="column"] img { max-width: 100% !important; height: auto !important; }
-        .stButton button { width: 100%; padding: 0.25rem 0.5rem; }
-    }
+    /* 優化標籤顏色與圓角 */
+    span[data-baseweb="tag"] { background-color: #ff4b4b !important; border-radius: 15px !important; padding: 2px 10px !important;}
     </style>
     """, unsafe_allow_html=True)
 
@@ -156,11 +152,11 @@ ALL_TAG_OPTIONS = sorted(list(set(DEFAULT_TAGS + existing_tags)))
 # === 側邊欄 ===
 with st.sidebar:
     st.header("功能選單")
-    page_mode = st.radio("前往頁面", ["📸 相簿瀏覽", "📊 數據統計"])
+    page_mode = st.radio("前往頁面", ["📸 相簿瀏覽", "📊 數據統計"], label_visibility="collapsed")
     st.divider()
-    st.header("📂 上傳作品")
     
-    album_mode = st.radio("模式", ["選擇現有相簿", "建立新相簿"])
+    st.header("📂 上傳作品")
+    album_mode = st.radio("上傳模式", ["選擇現有相簿", "建立新相簿"])
     if album_mode == "建立新相簿":
         current_album = st.text_input("輸入新相簿名稱")
     else:
@@ -168,7 +164,7 @@ with st.sidebar:
 
     uploaded_files = st.file_uploader("選擇圖片 (可多選)", type=['jpg', 'png', 'jpeg'], accept_multiple_files=True)
     
-    if uploaded_files and st.button("確認上傳", type="primary"):
+    if uploaded_files and st.button("確認上傳", type="primary", use_container_width=True):
         if not current_album: st.error("請輸入相簿名稱")
         else:
             progress = st.progress(0)
@@ -203,28 +199,30 @@ with st.sidebar:
 # === 頁面分流 ===
 
 if page_mode == "📸 相簿瀏覽":
-    st.subheader("🔍 瀏覽設定")
     
-    f_c1, f_c2, f_c3 = st.columns([1, 1.5, 1.5])
-    with f_c1: 
-        filter_album = st.selectbox("📂 相簿", ["全部"] + existing_albums)
-        st.write("") 
-        show_untagged = st.checkbox("只看未分類", help("只顯示無標籤圖片"))
-    
-    with f_c2:
-        filter_tags = st.multiselect("✅ 包含標籤 (同時符合)", existing_tags)
+    # [優化 1] 使用 st.expander 將龐大的篩選區塊收納起來，節省手機螢幕空間
+    with st.expander("🔍 篩選與排序設定", expanded=True):
+        f_c1, f_c2, f_c3 = st.columns([1, 1.5, 1.5])
+        with f_c1: 
+            filter_album = st.selectbox("📂 相簿", ["全部"] + existing_albums)
+            show_untagged = st.checkbox("只看未分類", help("只顯示無標籤圖片"))
         
-    with f_c3:
-        exclude_tags = st.multiselect("🚫 排除標籤 (不要這些)", existing_tags)
+        with f_c2:
+            filter_tags = st.multiselect("✅ 包含標籤 (同時符合)", existing_tags)
+            
+        with f_c3:
+            exclude_tags = st.multiselect("🚫 排除標籤 (不要這些)", existing_tags)
 
-    f_c4, f_c5, f_c6 = st.columns([2, 1, 1]) 
-    with f_c4: sort_option = st.selectbox("🔃 排序方式", ["日期 (新→舊)", "日期 (舊→新)", "檔名 (A→Z)", "檔名 (Z→A)", "標籤 (A→Z)"], index=0)
-    with f_c5:
-        all_years = sorted(list(set([p['date'].year for p in st.session_state.gallery])), reverse=True)
-        filter_year = st.selectbox("📅 年份", ["全部"] + all_years)
-    with f_c6:
-        all_months = list(range(1, 13))
-        filter_month = st.selectbox("🌙 月份", ["全部"] + all_months)
+        st.divider()
+        
+        f_c4, f_c5, f_c6 = st.columns(3) 
+        with f_c4: sort_option = st.selectbox("🔃 排序方式", ["日期 (新→舊)", "日期 (舊→新)", "檔名 (A→Z)", "檔名 (Z→A)", "標籤 (A→Z)"], index=0)
+        with f_c5:
+            all_years = sorted(list(set([p['date'].year for p in st.session_state.gallery])), reverse=True)
+            filter_year = st.selectbox("📅 年份", ["全部"] + all_years)
+        with f_c6:
+            all_months = list(range(1, 13))
+            filter_month = st.selectbox("🌙 月份", ["全部"] + all_months)
 
     filtered_photos = []
     for p in st.session_state.gallery:
@@ -251,27 +249,33 @@ if page_mode == "📸 相簿瀏覽":
     elif sort_option == "檔名 (Z→A)": filtered_photos.sort(key=lambda x: x['name'], reverse=True)
     elif sort_option == "標籤 (A→Z)": filtered_photos.sort(key=lambda x: x['tags'][0] if x['tags'] else "zzzz")
 
+    # 狀態列與全選按鈕 (優化手機滿版顯示)
+    st.write("")
+    s_col1, s_col2, s_col3 = st.columns([2, 1, 1])
+    with s_col1:
+        if filtered_photos: st.markdown(f"### 📸 共找到 :red[{len(filtered_photos)}] 張照片")
+        else: st.warning("⚠️ 共找到 0 張照片。")
+    with s_col2:
+        if st.button("✅ 全選本頁", use_container_width=True):
+            for p in filtered_photos: st.session_state[f"sel_{p['public_id']}"] = True
+            st.rerun()
+    with s_col3:
+        if st.button("❎ 取消全選", use_container_width=True):
+            for p in filtered_photos: st.session_state[f"sel_{p['public_id']}"] = False
+            st.rerun()
+            
     st.divider()
-    if filtered_photos: st.markdown(f"### 📸 共找到 :red[{len(filtered_photos)}] 張照片")
-    else: st.warning("⚠️ 共找到 0 張照片。")
 
-    # --- [修改重點] 移除大圖/網格切換，固定為3欄，並優化全選按鈕排版 ---
+    # 照片展示區 (Streamlit 會在手機上自動將 3 欄變成 1 欄大圖展示)
     num_columns = 3 
-    
-    sel_c1, sel_c2, _ = st.columns([2, 2, 6])
-    if sel_c1.button("✅ 全選本頁", use_container_width=True):
-        for p in filtered_photos: st.session_state[f"sel_{p['public_id']}"] = True
-        st.rerun()
-    if sel_c2.button("❎ 取消全選", use_container_width=True):
-        for p in filtered_photos: st.session_state[f"sel_{p['public_id']}"] = False
-        st.rerun()
-
     selected_photos = [] 
     if filtered_photos:
-        cols = st.columns(num_columns)
+        cols = st.columns(num_columns, gap="medium")
         for idx, photo in enumerate(filtered_photos):
             with cols[idx % num_columns]:
                 st.image(photo['url'], use_container_width=True)
+                
+                # [優化 2] 將控制按鈕與勾選框排版更緊湊
                 btn_col, check_col = st.columns([1, 4]) 
                 with btn_col:
                     if st.button("🔍", key=f"zoom_{photo['public_id']}", help="查看大圖"): show_large_image(photo)
@@ -284,52 +288,56 @@ if page_mode == "📸 相簿瀏覽":
                 size_str = format_file_size(photo.get('size', 0))
                 st.caption(f"{tags_str} | 📏 {size_str}")
                 
-                st.write("") 
+                st.write("") # 增加卡片之間的垂直間距
                 if is_selected: selected_photos.append(photo)
 
+    # --- [優化 3] 將批次操作區放入外框容器中，清楚隔離視覺 ---
     if selected_photos:
-        st.markdown("---")
-        st.info(f"⚡ 已選取 {len(selected_photos)} 張照片")
-        act_c1, act_c2 = st.columns(2)
-        with act_c1:
-            action_tags = st.multiselect("設定標籤操作", ALL_TAG_OPTIONS)
+        st.write("")
+        with st.container(border=True):
+            st.info(f"⚡ 已選取 {len(selected_photos)} 張照片，請進行下方批次操作：")
             
-            btn_col1, btn_col2 = st.columns(2)
-            if btn_col1.button("➕ 加入標籤"):
-                for p in selected_photos:
-                    for origin in st.session_state.gallery:
-                        if origin['public_id'] == p['public_id']:
-                            current_tags = origin.get('tags', [])
-                            origin['tags'] = list(set(current_tags + action_tags))
-                save_db(st.session_state.gallery)
-                st.toast("✅ 標籤已加入！")
-                time.sleep(1)
-                st.rerun()
+            act_c1, act_c2 = st.columns(2)
+            with act_c1:
+                action_tags = st.multiselect("設定標籤操作", ALL_TAG_OPTIONS)
                 
-            if btn_col2.button("🔄 完全覆蓋"):
-                for p in selected_photos:
-                    for origin in st.session_state.gallery:
-                        if origin['public_id'] == p['public_id']:
-                            origin['tags'] = action_tags
-                save_db(st.session_state.gallery)
-                st.toast("🔄 標籤已覆蓋！")
-                time.sleep(1)
-                st.rerun()
-                
-        with act_c2:
-            st.write("") 
-            st.write("")
-            if st.button("🗑️ 刪除選取照片", type="primary", use_container_width=True):
-                for p in selected_photos:
-                    delete_image_from_cloud(p['public_id'])
-                    st.session_state.gallery = [x for x in st.session_state.gallery if x['public_id'] != p['public_id']]
-                save_db(st.session_state.gallery)
-                st.success("已刪除！")
-                time.sleep(1)
-                st.rerun()
-                
-        st.write("") 
-        st.button("❎ 取消所有選取 (離開編輯模式)", use_container_width=True, on_click=clear_all_selections) 
+                btn_col1, btn_col2 = st.columns(2)
+                if btn_col1.button("➕ 加入標籤", use_container_width=True):
+                    for p in selected_photos:
+                        for origin in st.session_state.gallery:
+                            if origin['public_id'] == p['public_id']:
+                                current_tags = origin.get('tags', [])
+                                origin['tags'] = list(set(current_tags + action_tags))
+                    save_db(st.session_state.gallery)
+                    st.toast("✅ 標籤已加入！")
+                    time.sleep(1)
+                    st.rerun()
+                    
+                if btn_col2.button("🔄 完全覆蓋", use_container_width=True):
+                    for p in selected_photos:
+                        for origin in st.session_state.gallery:
+                            if origin['public_id'] == p['public_id']:
+                                origin['tags'] = action_tags
+                    save_db(st.session_state.gallery)
+                    st.toast("🔄 標籤已覆蓋！")
+                    time.sleep(1)
+                    st.rerun()
+                    
+            with act_c2:
+                # 為了與左邊的下拉選單對齊，加入空白
+                st.write("") 
+                st.write("")
+                if st.button("🗑️ 刪除選取照片", type="primary", use_container_width=True):
+                    for p in selected_photos:
+                        delete_image_from_cloud(p['public_id'])
+                        st.session_state.gallery = [x for x in st.session_state.gallery if x['public_id'] != p['public_id']]
+                    save_db(st.session_state.gallery)
+                    st.success("已刪除！")
+                    time.sleep(1)
+                    st.rerun()
+                    
+            st.divider()
+            st.button("❎ 取消所有選取 (離開編輯模式)", use_container_width=True, on_click=clear_all_selections) 
 
 else:
     # -----------------------------------------------------------
