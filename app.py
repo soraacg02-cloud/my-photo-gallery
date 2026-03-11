@@ -205,11 +205,9 @@ with st.sidebar:
 if page_mode == "📸 相簿瀏覽":
     st.subheader("🔍 瀏覽設定")
     
-    # --- [修改重點] 重新排版第一排：相簿、包含標籤、排除標籤 ---
     f_c1, f_c2, f_c3 = st.columns([1, 1.5, 1.5])
     with f_c1: 
         filter_album = st.selectbox("📂 相簿", ["全部"] + existing_albums)
-        # 把「只看未分類」移到相簿下方，節省空間
         st.write("") 
         show_untagged = st.checkbox("只看未分類", help("只顯示無標籤圖片"))
     
@@ -217,10 +215,8 @@ if page_mode == "📸 相簿瀏覽":
         filter_tags = st.multiselect("✅ 包含標籤 (同時符合)", existing_tags)
         
     with f_c3:
-        # [新增功能] 排除標籤選單
         exclude_tags = st.multiselect("🚫 排除標籤 (不要這些)", existing_tags)
 
-    # 第二排：排序 + 年份 + 月份
     f_c4, f_c5, f_c6 = st.columns([2, 1, 1]) 
     with f_c4: sort_option = st.selectbox("🔃 排序方式", ["日期 (新→舊)", "日期 (舊→新)", "檔名 (A→Z)", "檔名 (Z→A)", "標籤 (A→Z)"], index=0)
     with f_c5:
@@ -230,30 +226,22 @@ if page_mode == "📸 相簿瀏覽":
         all_months = list(range(1, 13))
         filter_month = st.selectbox("🌙 月份", ["全部"] + all_months)
 
-    # 執行篩選邏輯
     filtered_photos = []
     for p in st.session_state.gallery:
         match_album = (filter_album == "全部") or (p['album'] == filter_album)
         match_year = (filter_year == "全部") or (p['date'].year == filter_year)
         match_month = (filter_month == "全部") or (p['date'].month == filter_month)
         
-        # 標籤過濾邏輯
         if show_untagged: 
             match_tags = (len(p['tags']) == 0)
         else:
             match_tags = True
-            
-            # 1. 判斷「包含標籤」
             if filter_tags: 
                 match_tags = all(tag in p['tags'] for tag in filter_tags)
-                
-            # 2. 判斷「排除標籤」(如果前面已經不符合，就不用浪費時間判斷了)
             if match_tags and exclude_tags:
-                # 只要這張圖片的"任何一個"標籤出現在"排除標籤"列表裡，就判定為不符合 (False)
                 if any(tag in exclude_tags for tag in p['tags']):
                     match_tags = False
                     
-        # 結合所有條件
         if match_album and match_year and match_month and match_tags: 
             filtered_photos.append(p)
 
@@ -267,19 +255,16 @@ if page_mode == "📸 相簿瀏覽":
     if filtered_photos: st.markdown(f"### 📸 共找到 :red[{len(filtered_photos)}] 張照片")
     else: st.warning("⚠️ 共找到 0 張照片。")
 
-    ctrl_c1, ctrl_c2 = st.columns([1, 1])
-    with ctrl_c1:
-        view_mode = st.radio("👀 模式", ["網格", "大圖"], horizontal=True, label_visibility="collapsed")
-        num_columns = 3 if view_mode == "網格" else 1
-
-    with ctrl_c2:
-        sel_c1, sel_c2 = st.columns(2)
-        if sel_c1.button("✅ 全選本頁"):
-            for p in filtered_photos: st.session_state[f"sel_{p['public_id']}"] = True
-            st.rerun()
-        if sel_c2.button("❎ 取消全選"):
-            for p in filtered_photos: st.session_state[f"sel_{p['public_id']}"] = False
-            st.rerun()
+    # --- [修改重點] 移除大圖/網格切換，固定為3欄，並優化全選按鈕排版 ---
+    num_columns = 3 
+    
+    sel_c1, sel_c2, _ = st.columns([2, 2, 6])
+    if sel_c1.button("✅ 全選本頁", use_container_width=True):
+        for p in filtered_photos: st.session_state[f"sel_{p['public_id']}"] = True
+        st.rerun()
+    if sel_c2.button("❎ 取消全選", use_container_width=True):
+        for p in filtered_photos: st.session_state[f"sel_{p['public_id']}"] = False
+        st.rerun()
 
     selected_photos = [] 
     if filtered_photos:
@@ -299,7 +284,6 @@ if page_mode == "📸 相簿瀏覽":
                 size_str = format_file_size(photo.get('size', 0))
                 st.caption(f"{tags_str} | 📏 {size_str}")
                 
-                if num_columns == 1: st.text(f"相簿: {photo['album']} | 日期: {photo['date']}")
                 st.write("") 
                 if is_selected: selected_photos.append(photo)
 
