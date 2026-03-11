@@ -12,7 +12,7 @@ from PIL import Image
 
 # 設定網頁標題
 st.set_page_config(page_title="雲端圖庫 Ultimate", layout="wide")
-st.title("☁️ 雲端圖庫 (手機排版優化版)")
+st.title("☁️ 雲端圖庫 (手機網格修復版)")
 
 # --- 1. Cloudinary 連線設定 ---
 if "cloudinary" in st.secrets:
@@ -25,12 +25,28 @@ if "cloudinary" in st.secrets:
 
 DB_FILENAME = "photo_db_v2.json"
 
-# --- 2. CSS 微調 (移除會導致按鈕破版的強制網格) ---
+# --- 2. CSS 魔法修正 (精準打擊：只把照片變雙排) ---
 def inject_custom_css():
     st.markdown("""
     <style>
     /* 優化標籤顏色與圓角 */
     span[data-baseweb="tag"] { background-color: #ff4b4b !important; border-radius: 15px !important; padding: 2px 10px !important;}
+    
+    /* [核心修復] 手機版照片網格 */
+    @media (max-width: 640px) {
+        /* 只有「裡面包含 img 圖片」的欄位，才強制變成 50% 寬度 (雙排) */
+        [data-testid="column"]:has(img) {
+            width: 50% !important;
+            flex: 1 1 50% !important;
+            min-width: 50% !important;
+            padding: 0.2rem !important; /* 稍微減少手機版的間距 */
+        }
+        /* 確保按鈕在變小的雙排網格中不要溢出 */
+        [data-testid="column"]:has(img) .stButton button {
+            width: 100%;
+            padding: 0.1rem;
+        }
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -200,7 +216,6 @@ with st.sidebar:
 
 if page_mode == "📸 相簿瀏覽":
     
-    # [優化 1] 使用 st.expander 將龐大的篩選區塊收納起來，節省手機螢幕空間
     with st.expander("🔍 篩選與排序設定", expanded=True):
         f_c1, f_c2, f_c3 = st.columns([1, 1.5, 1.5])
         with f_c1: 
@@ -249,7 +264,6 @@ if page_mode == "📸 相簿瀏覽":
     elif sort_option == "檔名 (Z→A)": filtered_photos.sort(key=lambda x: x['name'], reverse=True)
     elif sort_option == "標籤 (A→Z)": filtered_photos.sort(key=lambda x: x['tags'][0] if x['tags'] else "zzzz")
 
-    # 狀態列與全選按鈕 (優化手機滿版顯示)
     st.write("")
     s_col1, s_col2, s_col3 = st.columns([2, 1, 1])
     with s_col1:
@@ -266,7 +280,7 @@ if page_mode == "📸 相簿瀏覽":
             
     st.divider()
 
-    # 照片展示區 (Streamlit 會在手機上自動將 3 欄變成 1 欄大圖展示)
+    # --- 照片展示區 ---
     num_columns = 3 
     selected_photos = [] 
     if filtered_photos:
@@ -275,7 +289,6 @@ if page_mode == "📸 相簿瀏覽":
             with cols[idx % num_columns]:
                 st.image(photo['url'], use_container_width=True)
                 
-                # [優化 2] 將控制按鈕與勾選框排版更緊湊
                 btn_col, check_col = st.columns([1, 4]) 
                 with btn_col:
                     if st.button("🔍", key=f"zoom_{photo['public_id']}", help="查看大圖"): show_large_image(photo)
@@ -288,10 +301,9 @@ if page_mode == "📸 相簿瀏覽":
                 size_str = format_file_size(photo.get('size', 0))
                 st.caption(f"{tags_str} | 📏 {size_str}")
                 
-                st.write("") # 增加卡片之間的垂直間距
+                st.write("") 
                 if is_selected: selected_photos.append(photo)
 
-    # --- [優化 3] 將批次操作區放入外框容器中，清楚隔離視覺 ---
     if selected_photos:
         st.write("")
         with st.container(border=True):
@@ -324,7 +336,6 @@ if page_mode == "📸 相簿瀏覽":
                     st.rerun()
                     
             with act_c2:
-                # 為了與左邊的下拉選單對齊，加入空白
                 st.write("") 
                 st.write("")
                 if st.button("🗑️ 刪除選取照片", type="primary", use_container_width=True):
