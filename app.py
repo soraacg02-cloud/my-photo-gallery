@@ -150,8 +150,6 @@ existing_albums = sorted(list(set([item['album'] for item in st.session_state.ga
 if "未分類" not in existing_albums: existing_albums.append("未分類")
 
 existing_tags = sorted(list(set([tag for item in st.session_state.gallery for tag in item['tags']])))
-
-# [修改處] 這裡新增了「無償」與「非無償」
 DEFAULT_TAGS = ["彩色", "線稿", "單人", "雙人", "無償", "非無償"]
 ALL_TAG_OPTIONS = sorted(list(set(DEFAULT_TAGS + existing_tags)))
 
@@ -286,18 +284,41 @@ if page_mode == "📸 相簿瀏覽":
         st.markdown("---")
         st.info(f"⚡ 已選取 {len(selected_photos)} 張照片")
         act_c1, act_c2 = st.columns(2)
+        
+        # --- [修改重點] 批次標籤操作區 ---
         with act_c1:
-            new_tags = st.multiselect("批次設定標籤", ALL_TAG_OPTIONS)
-            if st.button("更新標籤"):
+            action_tags = st.multiselect("設定標籤操作", ALL_TAG_OPTIONS)
+            
+            btn_col1, btn_col2 = st.columns(2)
+            # 按鈕 1：加入標籤 (保留舊的，加上新的)
+            if btn_col1.button("➕ 加入標籤"):
                 for p in selected_photos:
                     for origin in st.session_state.gallery:
-                        if origin['public_id'] == p['public_id']: origin['tags'] = new_tags
+                        if origin['public_id'] == p['public_id']:
+                            # 將新標籤與舊標籤合併，並利用 set 排除重複
+                            current_tags = origin.get('tags', [])
+                            origin['tags'] = list(set(current_tags + action_tags))
                 save_db(st.session_state.gallery)
-                st.toast("更新完成！")
+                st.toast("✅ 標籤已加入！")
                 time.sleep(1)
                 st.rerun()
+                
+            # 按鈕 2：覆蓋標籤 (完全取代舊的)
+            if btn_col2.button("🔄 完全覆蓋"):
+                for p in selected_photos:
+                    for origin in st.session_state.gallery:
+                        if origin['public_id'] == p['public_id']:
+                            origin['tags'] = action_tags
+                save_db(st.session_state.gallery)
+                st.toast("🔄 標籤已覆蓋！")
+                time.sleep(1)
+                st.rerun()
+                
+        # --- 刪除操作區 ---
         with act_c2:
-            if st.button("🗑️ 刪除照片", type="primary"):
+            st.write("") # 讓排版對齊
+            st.write("")
+            if st.button("🗑️ 刪除選取照片", type="primary", use_container_width=True):
                 for p in selected_photos:
                     delete_image_from_cloud(p['public_id'])
                     st.session_state.gallery = [x for x in st.session_state.gallery if x['public_id'] != p['public_id']]
@@ -305,12 +326,13 @@ if page_mode == "📸 相簿瀏覽":
                 st.success("已刪除！")
                 time.sleep(1)
                 st.rerun()
+                
         st.write("") 
         st.button("❎ 取消所有選取 (離開編輯模式)", use_container_width=True, on_click=clear_all_selections) 
 
 else:
     # -----------------------------------------------------------
-    #  [統計頁面] 新增相簿切換功能
+    #  [統計頁面] 
     # -----------------------------------------------------------
     st.header("📊 數據統計中心")
     st.write("查看不同相簿或整體的創作產量")
@@ -318,10 +340,8 @@ else:
     if not st.session_state.gallery:
         st.info("無資料，請先上傳照片！")
     else:
-        # [核心新增] 提供使用者選擇想統計的相簿
         stat_album = st.selectbox("📂 選擇要統計的相簿", ["全部"] + existing_albums)
         
-        # 根據選擇過濾出要計算的圖片 (Data Filtering)
         if stat_album == "全部":
             stat_photos = st.session_state.gallery
         else:
@@ -330,7 +350,6 @@ else:
         if not stat_photos:
             st.warning(f"相簿 '{stat_album}' 裡面目前沒有照片喔！")
         else:
-            # 1. 顯示 KPI 指標 (現在是根據過濾後的 stat_photos 來算)
             total_photos = len(stat_photos)
             untagged_count = len([p for p in stat_photos if not p['tags']])
             total_size_bytes = sum([p.get('size', 0) for p in stat_photos])
@@ -342,9 +361,8 @@ else:
             
             st.divider()
             
-            # 2. 製作樞紐分析表 (Pivot Table)
             raw_data = []
-            for p in stat_photos: # 這裡改用 stat_photos
+            for p in stat_photos: 
                 raw_data.append({
                     "Year": p['date'].year,
                     "Month": p['date'].month
@@ -352,15 +370,11 @@ else:
                 
             if raw_data:
                 df = pd.DataFrame(raw_data)
-                
-                # 計算交叉頻率 (Row=Month, Col=Year)
                 pivot_df = pd.crosstab(df['Month'], df['Year'])
                 
-                # 確保 1~12 月都有顯示
                 all_months = list(range(1, 13))
                 pivot_df = pivot_df.reindex(all_months, fill_value=0)
                 
-                # 加入「總計」列
                 pivot_df.loc['總計'] = pivot_df.sum()
                 pivot_df.index.name = "月份"
                 
