@@ -12,7 +12,7 @@ from PIL import Image
 
 # 設定網頁標題
 st.set_page_config(page_title="雲端圖庫 Ultimate", layout="wide")
-st.title("☁️ 雲端圖庫 (手機網格修復版)")
+st.title("☁️ 雲端圖庫 (手機完美雙欄版)")
 
 # --- 1. Cloudinary 連線設定 ---
 if "cloudinary" in st.secrets:
@@ -25,26 +25,41 @@ if "cloudinary" in st.secrets:
 
 DB_FILENAME = "photo_db_v2.json"
 
-# --- 2. CSS 魔法修正 (精準打擊：只把照片變雙排) ---
+# --- 2. CSS 魔法修正 (徹底覆寫 Streamlit 的手機單欄限制) ---
 def inject_custom_css():
     st.markdown("""
     <style>
-    /* 優化標籤顏色與圓角 */
+    /* 標籤美化 */
     span[data-baseweb="tag"] { background-color: #ff4b4b !important; border-radius: 15px !important; padding: 2px 10px !important;}
     
-    /* [核心修復] 手機版照片網格 */
+    /* 1. 隱藏我們用來定位的魔法標記 */
+    div[data-testid="element-container"]:has(.gallery-marker) {
+        display: none !important;
+    }
+
+    /* 2. 將照片總容器轉換為真正的 CSS Grid (網格系統) */
+    div[data-testid="stVerticalBlock"]:has(> div[data-testid="element-container"] .gallery-marker) {
+        display: grid !important;
+        grid-template-columns: repeat(3, 1fr) !important; /* 電腦版：強制 3 欄 */
+        gap: 1.5rem !important;
+        align-items: start !important;
+    }
+
+    /* 3. 手機版設定 (小於 640px) */
     @media (max-width: 640px) {
-        /* 只有「裡面包含 img 圖片」的欄位，才強制變成 50% 寬度 (雙排) */
-        [data-testid="column"]:has(img) {
-            width: 50% !important;
-            flex: 1 1 50% !important;
-            min-width: 50% !important;
-            padding: 0.2rem !important; /* 稍微減少手機版的間距 */
+        div[data-testid="stVerticalBlock"]:has(> div[data-testid="element-container"] .gallery-marker) {
+            grid-template-columns: repeat(2, 1fr) !important; /* 手機版：強制 2 欄並排！ */
+            gap: 0.5rem !important;
         }
-        /* 確保按鈕在變小的雙排網格中不要溢出 */
-        [data-testid="column"]:has(img) .stButton button {
-            width: 100%;
-            padding: 0.1rem;
+        
+        /* 手機版按鈕微調，避免被擠壓 */
+        div[data-testid="stVerticalBlock"]:has(> div[data-testid="element-container"] .gallery-marker) .stButton button {
+            padding: 0.1rem !important;
+        }
+        
+        /* 縮小手機版 Checkbox 的文字 */
+        div[data-testid="stVerticalBlock"]:has(> div[data-testid="element-container"] .gallery-marker) .stCheckbox label {
+            font-size: 0.8rem !important;
         }
     }
     </style>
@@ -280,29 +295,34 @@ if page_mode == "📸 相簿瀏覽":
             
     st.divider()
 
-    # --- 照片展示區 ---
-    num_columns = 3 
+    # --- [核心修改] 照片展示區 ---
     selected_photos = [] 
     if filtered_photos:
-        cols = st.columns(num_columns, gap="medium")
-        for idx, photo in enumerate(filtered_photos):
-            with cols[idx % num_columns]:
-                st.image(photo['url'], use_container_width=True)
-                
-                btn_col, check_col = st.columns([1, 4]) 
-                with btn_col:
-                    if st.button("🔍", key=f"zoom_{photo['public_id']}", help="查看大圖"): show_large_image(photo)
-                with check_col:
-                    key = f"sel_{photo['public_id']}"
-                    if key not in st.session_state: st.session_state[key] = False
-                    is_selected = st.checkbox(f"{photo['name']}", key=key)
-                
-                tags_str = f"🏷️ {','.join(photo['tags'])}" if photo['tags'] else "❌ 未分類"
-                size_str = format_file_size(photo.get('size', 0))
-                st.caption(f"{tags_str} | 📏 {size_str}")
-                
-                st.write("") 
-                if is_selected: selected_photos.append(photo)
+        # 1. 建立一個大的容器
+        with st.container():
+            # 2. 放入我們的「魔法標記」，這會觸發我們寫好的 CSS Grid 網格
+            st.markdown('<span class="gallery-marker"></span>', unsafe_allow_html=True)
+            
+            # 3. 直接輸出每一張照片 (不再使用 st.columns 來排版)
+            for photo in filtered_photos:
+                # 把每張照片包裝成一張「卡片」
+                with st.container():
+                    st.image(photo['url'], use_container_width=True)
+                    
+                    btn_col, check_col = st.columns([1, 4]) 
+                    with btn_col:
+                        if st.button("🔍", key=f"zoom_{photo['public_id']}", help="查看大圖"): show_large_image(photo)
+                    with check_col:
+                        key = f"sel_{photo['public_id']}"
+                        if key not in st.session_state: st.session_state[key] = False
+                        is_selected = st.checkbox(f"{photo['name']}", key=key)
+                    
+                    tags_str = f"🏷️ {','.join(photo['tags'])}" if photo['tags'] else "❌ 未分類"
+                    size_str = format_file_size(photo.get('size', 0))
+                    st.caption(f"{tags_str} | 📏 {size_str}")
+                    
+                    st.write("") 
+                    if is_selected: selected_photos.append(photo)
 
     if selected_photos:
         st.write("")
