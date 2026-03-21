@@ -175,8 +175,6 @@ existing_albums = sorted(list(set([item['album'] for item in st.session_state.ga
 if "未分類" not in existing_albums: existing_albums.append("未分類")
 
 existing_tags = sorted(list(set([tag for item in st.session_state.gallery for tag in item['tags']])))
-
-# --- [修改重點] 這裡新增了「人物」與「風景」 ---
 DEFAULT_TAGS = ["彩色", "線稿", "單人", "雙人", "無償", "非無償", "人物", "風景"]
 ALL_TAG_OPTIONS = sorted(list(set(DEFAULT_TAGS + existing_tags)))
 
@@ -195,37 +193,63 @@ with st.sidebar:
 
     uploaded_files = st.file_uploader("選擇圖片 (可多選)", type=['jpg', 'png', 'jpeg'], accept_multiple_files=True)
     
-    if uploaded_files and st.button("確認上傳", type="primary", use_container_width=True):
-        if not current_album: st.error("請輸入相簿名稱")
+    # --- [核心修改] 重複檔名偵測邏輯 ---
+    if uploaded_files:
+        # 1. 取得目前資料庫中所有的檔名
+        existing_names = [p['name'] for p in st.session_state.gallery]
+        # 2. 找出這次上傳的檔案中，哪些已經存在了
+        duplicates = [f.name for f in uploaded_files if f.name in existing_names]
+        
+        # 3. 如果有重複，顯示警告並給予選項
+        if duplicates:
+            st.warning(f"⚠️ 發現重複的檔名：\n{', '.join(duplicates)}")
+            upload_mode = st.radio("遇到重複檔案的處理方式：", ["略過重複檔案 (建議)", "強制全部上傳"])
         else:
-            progress = st.progress(0)
-            status_text = st.empty()
-            
-            for i, f in enumerate(uploaded_files):
-                status_text.text(f"處理中 {i+1}/{len(uploaded_files)}：{f.name} (壓縮中...)")
-                try:
-                    compressed_file = compress_image(f)
-                    file_size_bytes = compressed_file.getbuffer().nbytes
-                    res = cloudinary.uploader.upload(compressed_file)
-                    
-                    try: d = datetime.datetime.strptime(f.name[:8], "%Y%m%d").date()
-                    except: d = datetime.date.today()
-                    
-                    st.session_state.gallery.append({
-                        "public_id": res['public_id'], "url": res['secure_url'], 
-                        "name": f.name, "date": d, "tags": [], "album": current_album,
-                        "size": file_size_bytes 
-                    })
-                except Exception as e:
-                    st.error(f"❌ {f.name} 上傳失敗: {e}")
+            upload_mode = "強制全部上傳" # 如果沒有重複，這個變數不會被看到，但需要給定預設值
+
+        if st.button("確認上傳", type="primary", use_container_width=True):
+            if not current_album: 
+                st.error("請輸入相簿名稱")
+            else:
+                # 4. 根據使用者的選擇，過濾掉重複的檔案
+                if duplicates and upload_mode == "略過重複檔案 (建議)":
+                    final_files = [f for f in uploaded_files if f.name not in existing_names]
+                else:
+                    final_files = uploaded_files
                 
-                progress.progress((i+1)/len(uploaded_files))
-            
-            status_text.text("儲存資料庫...")
-            save_db(st.session_state.gallery)
-            st.success("完成！")
-            time.sleep(1)
-            st.rerun()
+                # 5. 如果過濾後沒有檔案可以上傳了，提早結束
+                if not final_files:
+                    st.info("💡 所有檔案皆已存在圖庫中，無新檔案需要上傳。")
+                else:
+                    # 開始上傳流程
+                    progress = st.progress(0)
+                    status_text = st.empty()
+                    
+                    for i, f in enumerate(final_files):
+                        status_text.text(f"處理中 {i+1}/{len(final_files)}：{f.name} (壓縮中...)")
+                        try:
+                            compressed_file = compress_image(f)
+                            file_size_bytes = compressed_file.getbuffer().nbytes
+                            res = cloudinary.uploader.upload(compressed_file)
+                            
+                            try: d = datetime.datetime.strptime(f.name[:8], "%Y%m%d").date()
+                            except: d = datetime.date.today()
+                            
+                            st.session_state.gallery.append({
+                                "public_id": res['public_id'], "url": res['secure_url'], 
+                                "name": f.name, "date": d, "tags": [], "album": current_album,
+                                "size": file_size_bytes 
+                            })
+                        except Exception as e:
+                            st.error(f"❌ {f.name} 上傳失敗: {e}")
+                        
+                        progress.progress((i+1)/len(final_files))
+                    
+                    status_text.text("儲存資料庫...")
+                    save_db(st.session_state.gallery)
+                    st.success("上傳完成！")
+                    time.sleep(1)
+                    st.rerun()
 
 # === 頁面分流 ===
 
