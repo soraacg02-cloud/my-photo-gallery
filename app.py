@@ -26,7 +26,7 @@ if "cloudinary" in st.secrets:
 DB_FILENAME = "photo_db_v2.json"
 
 
-# --- 2. 專屬 CSS 魔法 (精準分開電腦與手機排版 + 右上角懸浮鈕 + 手機拉霸加寬) ---
+# --- 2. 專屬 CSS 魔法 (精準避開 Streamlit 頂欄 + 手機拉霸加寬) ---
 def inject_custom_css():
     st.markdown(
         """
@@ -34,12 +34,12 @@ def inject_custom_css():
     /* 標籤美化 */
     span[data-baseweb="tag"] { background-color: #ff4b4b !important; border-radius: 15px !important; padding: 2px 10px !important;}
     
-    /* 1. 向上懸浮按鈕樣式 (置於右上角) */
+    /* 1. 向上懸浮按鈕樣式 (右側偏上，避開 Streamlit 原生頂部選單) */
     .back-to-top {
         position: fixed;
-        top: 30px;
-        right: 30px;
-        z-index: 99999;
+        top: 100px;
+        right: 25px;
+        z-index: 999999;
         background-color: #ff4b4b;
         color: white !important;
         width: 50px;
@@ -48,7 +48,7 @@ def inject_custom_css():
         text-align: center;
         line-height: 50px;
         font-size: 24px;
-        box-shadow: 0px 4px 10px rgba(0,0,0,0.3);
+        box-shadow: 0px 4px 12px rgba(0,0,0,0.35);
         cursor: pointer;
         text-decoration: none !important;
         transition: all 0.3s ease;
@@ -103,10 +103,10 @@ def inject_custom_css():
             padding: 0.1rem !important;
         }
 
-        /* 手機端右上角懸浮鈕微調 */
+        /* 手機端懸浮鈕微調 */
         .back-to-top {
-            top: 20px;
-            right: 20px;
+            top: 80px;
+            right: 15px;
             width: 45px;
             height: 45px;
             line-height: 45px;
@@ -293,7 +293,6 @@ DEFAULT_TAGS = [
 db_existing_tags = [
     tag for item in st.session_state.gallery for tag in item["tags"]
 ]
-# 合併預設與現有標籤，全部統一為全域唯一的選單清單
 ALL_TAG_OPTIONS = sorted(list(set(DEFAULT_TAGS + db_existing_tags)))
 
 # === 側邊欄 ===
@@ -404,13 +403,11 @@ if page_mode == "📸 相簿瀏覽":
             )
 
         with f_c2:
-            # 使用統一標籤列表 ALL_TAG_OPTIONS
             filter_tags = st.multiselect(
                 "✅ 包含標籤 (同時符合)", ALL_TAG_OPTIONS
             )
 
         with f_c3:
-            # 使用統一標籤列表 ALL_TAG_OPTIONS
             exclude_tags = st.multiselect(
                 "🚫 排除標籤 (不要這些)", ALL_TAG_OPTIONS
             )
@@ -550,7 +547,6 @@ if page_mode == "📸 相簿瀏覽":
 
             act_c1, act_c2 = st.columns(2)
             with act_c1:
-                # 使用統一標籤列表 ALL_TAG_OPTIONS
                 action_tags = st.multiselect("設定標籤操作", ALL_TAG_OPTIONS)
 
                 btn_col1, btn_col2 = st.columns(2)
@@ -663,13 +659,11 @@ else:
                 if selected_years:
                     filtered_pivot = pivot_df[selected_years]
 
-                    # 1. 長條圖在上方
                     st.subheader(f"📈 年度產量比較 ({stat_album})")
                     st.bar_chart(filtered_pivot)
 
                     st.divider()
 
-                    # 2. 統計表格在下方
                     st.subheader(f"🗓️ 年度月別統計表 ({stat_album})")
                     table_df = filtered_pivot.copy()
                     table_df.loc["總計"] = table_df.sum()
