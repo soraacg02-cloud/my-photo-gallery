@@ -26,7 +26,7 @@ if "cloudinary" in st.secrets:
 DB_FILENAME = "photo_db_v2.json"
 
 
-# --- 2. 專屬 CSS 魔法 (精準分開電腦與手機排版 + 懸浮鈕 + 手機拉霸加寬) ---
+# --- 2. 專屬 CSS 魔法 (精準分開電腦與手機排版 + 右上角懸浮鈕 + 手機拉霸加寬) ---
 def inject_custom_css():
     st.markdown(
         """
@@ -34,12 +34,12 @@ def inject_custom_css():
     /* 標籤美化 */
     span[data-baseweb="tag"] { background-color: #ff4b4b !important; border-radius: 15px !important; padding: 2px 10px !important;}
     
-    /* 1. 向上懸浮按鈕樣式 */
+    /* 1. 向上懸浮按鈕樣式 (置於右上角) */
     .back-to-top {
         position: fixed;
-        bottom: 30px;
+        top: 30px;
         right: 30px;
-        z-index: 9999;
+        z-index: 99999;
         background-color: #ff4b4b;
         color: white !important;
         width: 50px;
@@ -103,9 +103,9 @@ def inject_custom_css():
             padding: 0.1rem !important;
         }
 
-        /* 手機端懸浮鈕微調 */
+        /* 手機端右上角懸浮鈕微調 */
         .back-to-top {
-            bottom: 20px;
+            top: 20px;
             right: 20px;
             width: 45px;
             height: 45px;
@@ -142,7 +142,6 @@ def format_file_size(size_in_bytes):
 def compress_image(image_file):
     try:
         img = Image.open(image_file)
-        # 修正 EXIF 轉向問題
         try:
             exif = img._getexif()
             if exif is not None:
@@ -279,13 +278,7 @@ existing_albums = sorted(
 if "未分類" not in existing_albums:
     existing_albums.append("未分類")
 
-existing_tags = sorted(
-    list(
-        set([tag for item in st.session_state.gallery for tag in item["tags"]])
-    )
-)
-
-# 需求 1: 新增 "生物" 標籤
+# --- 全域統一標籤列表 ---
 DEFAULT_TAGS = [
     "彩色",
     "線稿",
@@ -297,7 +290,11 @@ DEFAULT_TAGS = [
     "風景",
     "生物",
 ]
-ALL_TAG_OPTIONS = sorted(list(set(DEFAULT_TAGS + existing_tags)))
+db_existing_tags = [
+    tag for item in st.session_state.gallery for tag in item["tags"]
+]
+# 合併預設與現有標籤，全部統一為全域唯一的選單清單
+ALL_TAG_OPTIONS = sorted(list(set(DEFAULT_TAGS + db_existing_tags)))
 
 # === 側邊欄 ===
 with st.sidebar:
@@ -322,7 +319,6 @@ with st.sidebar:
         accept_multiple_files=True,
     )
 
-    # --- 重複檔名偵測邏輯 ---
     if uploaded_files:
         existing_names = [p["name"] for p in st.session_state.gallery]
         duplicates = [
@@ -408,13 +404,15 @@ if page_mode == "📸 相簿瀏覽":
             )
 
         with f_c2:
+            # 使用統一標籤列表 ALL_TAG_OPTIONS
             filter_tags = st.multiselect(
-                "✅ 包含標籤 (同時符合)", existing_tags
+                "✅ 包含標籤 (同時符合)", ALL_TAG_OPTIONS
             )
 
         with f_c3:
+            # 使用統一標籤列表 ALL_TAG_OPTIONS
             exclude_tags = st.multiselect(
-                "🚫 排除標籤 (不要這些)", existing_tags
+                "🚫 排除標籤 (不要這些)", ALL_TAG_OPTIONS
             )
 
         st.divider()
@@ -552,6 +550,7 @@ if page_mode == "📸 相簿瀏覽":
 
             act_c1, act_c2 = st.columns(2)
             with act_c1:
+                # 使用統一標籤列表 ALL_TAG_OPTIONS
                 action_tags = st.multiselect("設定標籤操作", ALL_TAG_OPTIONS)
 
                 btn_col1, btn_col2 = st.columns(2)
@@ -654,7 +653,6 @@ else:
                 all_months = list(range(1, 13))
                 pivot_df = pivot_df.reindex(all_months, fill_value=0)
 
-                # 需求 2: 增加長條圖年份選擇器
                 available_years = sorted(list(pivot_df.columns), reverse=True)
                 selected_years = st.multiselect(
                     "📅 選擇要比較的年份 (可多選)：",
@@ -663,16 +661,15 @@ else:
                 )
 
                 if selected_years:
-                    # 依選擇的年份過濾
                     filtered_pivot = pivot_df[selected_years]
 
-                    # 1. 放置長條圖在上方
+                    # 1. 長條圖在上方
                     st.subheader(f"📈 年度產量比較 ({stat_album})")
                     st.bar_chart(filtered_pivot)
 
                     st.divider()
 
-                    # 2. 放置統計表格在下方
+                    # 2. 統計表格在下方
                     st.subheader(f"🗓️ 年度月別統計表 ({stat_album})")
                     table_df = filtered_pivot.copy()
                     table_df.loc["總計"] = table_df.sum()
