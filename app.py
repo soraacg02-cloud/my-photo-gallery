@@ -35,7 +35,7 @@ def inject_custom_css():
     /* 標籤美化 */
     span[data-baseweb="tag"] { background-color: #ff4b4b !important; border-radius: 15px !important; padding: 2px 10px !important;}
     
-    /* 懸浮按鈕樣式 (向上 / 向下) */
+    /* 1. 懸浮按鈕基礎樣式 (向上 / 向下) */
     .float-btn {
         position: fixed;
         right: 25px;
@@ -94,6 +94,7 @@ def inject_custom_css():
     }
     </style>
 
+    <!-- 頂部與底部錨點 -->
     <div id="top-anchor"></div>
     <a href="#top-anchor" class="float-btn back-to-top" title="回到頂部">⬆️</a>
     <a href="#bottom-anchor" class="float-btn go-to-bottom" title="移至底部">⬇️</a>
@@ -107,6 +108,7 @@ inject_custom_css()
 
 # --- 3. 核心功能函數 ---
 def get_thumbnail_url(url, width=400):
+    """利用 Cloudinary 動態轉換取得輕量縮圖"""
     if "/upload/" in url:
         return url.replace(
             "/upload/", f"/upload/w_{width},c_scale,q_auto,f_auto/"
@@ -220,22 +222,7 @@ def request_clear_selections():
     st.session_state["need_clear_selections"] = True
 
 
-# --- 4. 移位交換邏輯 ---
-def move_photo(public_id, direction):
-    """移動圖片位置 (direction: -1 往前, 1 往後)"""
-    gallery = st.session_state.gallery
-    idx = next((i for i, p in enumerate(gallery) if p["public_id"] == public_id), None)
-    
-    if idx is not None:
-        new_idx = idx + direction
-        if 0 <= new_idx < len(gallery):
-            # 交換兩張圖片的位置
-            gallery[idx], gallery[new_idx] = gallery[new_idx], gallery[idx]
-            save_db(gallery)
-            st.rerun()
-
-
-# --- 5. 應用程式主邏輯 ---
+# --- 4. 應用程式主邏輯 ---
 
 if st.session_state.get("need_clear_selections", False):
     for key in list(st.session_state.keys()):
@@ -248,12 +235,13 @@ if "gallery" not in st.session_state:
         st.session_state.gallery = load_db()
 
 
-# === 📸 照片詳情 Modal ===
+# === 📸 照片詳情 Modal (含新增：修改檔名功能) ===
 @st.dialog("📸 照片詳情", width="large")
 def show_large_image(photo):
     st.image(photo["url"], use_container_width=True)
     st.divider()
 
+    # --- ✏️ 新增修改檔名功能 ---
     st.subheader("✏️ 修改檔名")
     new_name = st.text_input("檔名", value=photo["name"], key=f"edit_name_{photo['public_id']}")
     if st.button("💾 儲存檔名", use_container_width=True):
@@ -302,9 +290,11 @@ if "share" in query_params:
     st.title("🖼️ 專屬分享相簿")
     st.caption("您正透過專屬分享連結瀏覽特定相片內容")
 
+    # 注入防下載/防右鍵/防拖曳 CSS 與 JS 魔法
     st.markdown(
         """
         <style>
+        /* 防拖曳與複製圖片 */
         img {
             pointer-events: none !important;
             -webkit-touch-callout: none !important;
@@ -313,6 +303,7 @@ if "share" in query_params:
         }
         </style>
         <script>
+        // 禁用右鍵選單
         document.addEventListener('contextmenu', event => event.preventDefault());
         </script>
         """,
@@ -322,12 +313,9 @@ if "share" in query_params:
     raw_share = query_params["share"]
     shared_ids = [pid.strip() for pid in raw_share.split(",") if pid.strip()]
 
-    # 保持分享者選取的特定順序
-    shared_photos = []
-    for sid in shared_ids:
-        found = next((p for p in st.session_state.gallery if p["public_id"] == sid), None)
-        if found:
-            shared_photos.append(found)
+    shared_photos = [
+        p for p in st.session_state.gallery if p["public_id"] in shared_ids
+    ]
 
     if not shared_photos:
         st.error("⚠️ 找不到分享的照片，連結可能已失效或圖片已被刪除。")
@@ -335,6 +323,7 @@ if "share" in query_params:
         st.success(f"📷 共有 {len(shared_photos)} 張分享的作品")
         st.divider()
 
+        # 僅提供純縮圖展示，移除「🔍 查看大圖」彈窗與下載連結
         for i in range(0, len(shared_photos), 3):
             cols = st.columns(3)
             for j in range(3):
@@ -348,6 +337,7 @@ if "share" in query_params:
                             )
                             st.caption(f"📄 {photo['name']}")
 
+    # 頁尾錨點 (供懸浮按鈕跳轉)
     st.markdown('<div id="bottom-anchor"></div>', unsafe_allow_html=True)
     st.stop()
 
@@ -506,7 +496,6 @@ if page_mode == "📸 相簿瀏覽":
             sort_option = st.selectbox(
                 "🔃 排序方式",
                 [
-                    "✨ 自訂順序 (預設/手動)",
                     "日期 (新→舊)",
                     "日期 (舊→新)",
                     "檔名 (A→Z)",
@@ -556,7 +545,6 @@ if page_mode == "📸 相簿瀏覽":
         if match_album and match_year and match_month and match_tags:
             filtered_photos.append(p)
 
-    # 排序處理
     if sort_option == "日期 (舊→新)":
         filtered_photos.sort(key=lambda x: x["date"])
     elif sort_option == "日期 (新→舊)":
@@ -569,7 +557,6 @@ if page_mode == "📸 相簿瀏覽":
         filtered_photos.sort(
             key=lambda x: x["tags"][0] if x["tags"] else "zzzz"
         )
-    # 若選「✨ 自訂順序」，則維持 st.session_state.gallery 預設的順序
 
     st.write("")
     s_col1, s_col2, s_col3 = st.columns([2, 1, 1])
@@ -614,7 +601,6 @@ if page_mode == "📸 相簿瀏覽":
                                     use_container_width=True,
                                 )
 
-                                # 按鈕列：放大、勾選框、左移、右移
                                 btn_col, check_col = st.columns([1, 4])
                                 with btn_col:
                                     if st.button(
@@ -630,25 +616,6 @@ if page_mode == "📸 相簿瀏覽":
                                     is_selected = st.checkbox(
                                         f"{photo['name']}", key=key
                                     )
-
-                                # 自訂順序微調按鈕
-                                move_c1, move_c2 = st.columns(2)
-                                with move_c1:
-                                    if st.button(
-                                        "⬅️ 前移",
-                                        key=f"left_{photo['public_id']}",
-                                        use_container_width=True,
-                                        help="將此圖片往左/往前挪一格",
-                                    ):
-                                        move_photo(photo["public_id"], -1)
-                                with move_c2:
-                                    if st.button(
-                                        "➡️ 後移",
-                                        key=f"right_{photo['public_id']}",
-                                        use_container_width=True,
-                                        help="將此圖片往右/往後挪一格",
-                                    ):
-                                        move_photo(photo["public_id"], 1)
 
                                 tags_str = (
                                     f"🏷️ {','.join(photo['tags'])}"
@@ -877,4 +844,5 @@ else:
                         "💡 請至少選擇一個年份以顯示圖表與數據表。"
                     )
 
+# 頁尾錨點 (供懸浮按鈕跳轉)
 st.markdown('<div id="bottom-anchor"></div>', unsafe_allow_html=True)
