@@ -35,10 +35,9 @@ def inject_custom_css():
     /* 標籤美化 */
     span[data-baseweb="tag"] { background-color: #ff4b4b !important; border-radius: 15px !important; padding: 2px 10px !important;}
     
-    /* 向上懸浮按鈕樣式 */
-    .back-to-top {
+    /* 1. 懸浮按鈕基礎樣式 (向上 / 向下) */
+    .float-btn {
         position: fixed;
-        top: 100px;
         right: 25px;
         z-index: 999999;
         background-color: #ff4b4b;
@@ -48,13 +47,16 @@ def inject_custom_css():
         border-radius: 50%;
         text-align: center;
         line-height: 50px;
-        font-size: 24px;
+        font-size: 22px;
         box-shadow: 0px 4px 12px rgba(0,0,0,0.35);
         cursor: pointer;
         text-decoration: none !important;
         transition: all 0.3s ease;
     }
-    .back-to-top:hover {
+    .back-to-top { top: 100px; }
+    .go-to-bottom { top: 160px; }
+    
+    .float-btn:hover {
         background-color: #e03e3e;
         transform: scale(1.1);
     }
@@ -86,12 +88,16 @@ def inject_custom_css():
             padding: 0.1rem !important;
         }
 
-        .back-to-top { top: 80px; right: 15px; width: 45px; height: 45px; line-height: 45px; font-size: 20px; }
+        .float-btn { width: 45px; height: 45px; line-height: 45px; font-size: 18px; right: 15px; }
+        .back-to-top { top: 80px; }
+        .go-to-bottom { top: 135px; }
     }
     </style>
 
+    <!-- 頂部與底部錨點 -->
     <div id="top-anchor"></div>
-    <a href="#top-anchor" class="back-to-top" title="回到頂部">⬆️</a>
+    <a href="#top-anchor" class="float-btn back-to-top" title="回到頂部">⬆️</a>
+    <a href="#bottom-anchor" class="float-btn go-to-bottom" title="移至底部">⬇️</a>
     """,
         unsafe_allow_html=True,
     )
@@ -102,6 +108,7 @@ inject_custom_css()
 
 # --- 3. 核心功能函數 ---
 def get_thumbnail_url(url, width=400):
+    """利用 Cloudinary 動態轉換取得輕量縮圖"""
     if "/upload/" in url:
         return url.replace(
             "/upload/", f"/upload/w_{width},c_scale,q_auto,f_auto/"
@@ -212,13 +219,11 @@ def delete_image_from_cloud(public_id):
 
 
 def request_clear_selections():
-    """設定清除選取標記，會在下一次渲染前安全清除"""
     st.session_state["need_clear_selections"] = True
 
 
 # --- 4. 應用程式主邏輯 ---
 
-# 可以在元件繪製前安全清理狀態
 if st.session_state.get("need_clear_selections", False):
     for key in list(st.session_state.keys()):
         if key.startswith("sel_"):
@@ -229,12 +234,30 @@ if "gallery" not in st.session_state:
     with st.spinner("載入資料庫..."):
         st.session_state.gallery = load_db()
 
+
+# === 📸 照片詳情 Modal (含新增：修改檔名功能) ===
 @st.dialog("📸 照片詳情", width="large")
 def show_large_image(photo):
     st.image(photo["url"], use_container_width=True)
     st.divider()
 
-    st.markdown(f"**檔名**: {photo['name']}")
+    # --- ✏️ 新增修改檔名功能 ---
+    st.subheader("✏️ 修改檔名")
+    new_name = st.text_input("檔名", value=photo["name"], key=f"edit_name_{photo['public_id']}")
+    if st.button("💾 儲存檔名", use_container_width=True):
+        if new_name.strip():
+            for origin in st.session_state.gallery:
+                if origin["public_id"] == photo["public_id"]:
+                    origin["name"] = new_name.strip()
+                    break
+            save_db(st.session_state.gallery)
+            st.toast("✅ 檔名已成功修改！")
+            time.sleep(0.5)
+            st.rerun()
+        else:
+            st.error("檔名不能為空！")
+
+    st.divider()
 
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -257,14 +280,35 @@ def show_large_image(photo):
         unsafe_allow_html=True,
     )
 
+
 # =========================================================
-# 🔗 [分享存取頁面]
+# 🔗 [分享頁面]（鎖定：不可放大、不可下載圖片、防右鍵）
 # =========================================================
 query_params = st.query_params
 
 if "share" in query_params:
     st.title("🖼️ 專屬分享相簿")
     st.caption("您正透過專屬分享連結瀏覽特定相片內容")
+
+    # 注入防下載/防右鍵/防拖曳 CSS 與 JS 魔法
+    st.markdown(
+        """
+        <style>
+        /* 防拖曳與複製圖片 */
+        img {
+            pointer-events: none !important;
+            -webkit-touch-callout: none !important;
+            -webkit-user-select: none !important;
+            user-select: none !important;
+        }
+        </style>
+        <script>
+        // 禁用右鍵選單
+        document.addEventListener('contextmenu', event => event.preventDefault());
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
 
     raw_share = query_params["share"]
     shared_ids = [pid.strip() for pid in raw_share.split(",") if pid.strip()]
@@ -276,9 +320,10 @@ if "share" in query_params:
     if not shared_photos:
         st.error("⚠️ 找不到分享的照片，連結可能已失效或圖片已被刪除。")
     else:
-        st.success(f"📷 共有 {len(shared_photos)} 張分享的照片")
+        st.success(f"📷 共有 {len(shared_photos)} 張分享的作品")
         st.divider()
 
+        # 僅提供純縮圖展示，移除「🔍 查看大圖」彈窗與下載連結
         for i in range(0, len(shared_photos), 3):
             cols = st.columns(3)
             for j in range(3):
@@ -292,13 +337,8 @@ if "share" in query_params:
                             )
                             st.caption(f"📄 {photo['name']}")
 
-                            if st.button(
-                                "🔍 查看大圖",
-                                key=f"share_zoom_{photo['public_id']}",
-                                use_container_width=True,
-                            ):
-                                show_large_image(photo)
-
+    # 頁尾錨點 (供懸浮按鈕跳轉)
+    st.markdown('<div id="bottom-anchor"></div>', unsafe_allow_html=True)
     st.stop()
 
 # =========================================================
@@ -566,7 +606,7 @@ if page_mode == "📸 相簿瀏覽":
                                     if st.button(
                                         "🔍",
                                         key=f"zoom_{photo['public_id']}",
-                                        help="查看大圖",
+                                        help="查看大圖與修改檔名",
                                     ):
                                         show_large_image(photo)
                                 with check_col:
@@ -666,9 +706,7 @@ if page_mode == "📸 相簿瀏覽":
             components.html(copy_code, height=105)
 
             st.caption(
-                "💡 **說明**：點擊「一鍵複製完整分享連結」發給其他人，對方打開後將只能看到這 "
-                + str(len(selected_photos))
-                + " 張作品。"
+                "💡 **說明**：點擊「一鍵複製完整分享連結」發給其他人，對方開啟後將只能看到選取的作品，且無法放大或下載圖片。"
             )
 
             st.divider()
@@ -805,3 +843,6 @@ else:
                     st.info(
                         "💡 請至少選擇一個年份以顯示圖表與數據表。"
                     )
+
+# 頁尾錨點 (供懸浮按鈕跳轉)
+st.markdown('<div id="bottom-anchor"></div>', unsafe_allow_html=True)
