@@ -2,6 +2,7 @@ import datetime
 from io import BytesIO
 import json
 import time
+import urllib.parse
 import cloudinary
 import cloudinary.api
 import cloudinary.uploader
@@ -12,7 +13,6 @@ import streamlit as st
 
 # --- 網頁配置 ---
 st.set_page_config(page_title="雲端圖庫 Ultimate", layout="wide")
-st.title("☁️ 雲端圖庫 (電腦/手機 雙重適應版)")
 
 # --- 1. Cloudinary 連線設定 ---
 if "cloudinary" in st.secrets:
@@ -26,7 +26,7 @@ if "cloudinary" in st.secrets:
 DB_FILENAME = "photo_db_v2.json"
 
 
-# --- 2. 專屬 CSS 魔法 (精準避開 Streamlit 頂欄 + 手機拉霸加寬) ---
+# --- 2. 專屬 CSS 魔法 ---
 def inject_custom_css():
     st.markdown(
         """
@@ -34,7 +34,7 @@ def inject_custom_css():
     /* 標籤美化 */
     span[data-baseweb="tag"] { background-color: #ff4b4b !important; border-radius: 15px !important; padding: 2px 10px !important;}
     
-    /* 1. 向上懸浮按鈕樣式 (右側偏上，避開 Streamlit 原生頂部選單) */
+    /* 向上懸浮按鈕樣式 */
     .back-to-top {
         position: fixed;
         top: 100px;
@@ -58,64 +58,37 @@ def inject_custom_css():
         transform: scale(1.1);
     }
 
-    /* =========================================
-       手機版專屬排版魔法 (小於 640px 啟動) 
-       ========================================= */
+    /* 手機版專屬排版 (小於 640px) */
     @media (max-width: 640px) {
-        /* 手機拉霸 (Scrollbar) 加寬放大設計 */
-        ::-webkit-scrollbar {
-            width: 14px !important;
-            height: 14px !important;
-        }
-        ::-webkit-scrollbar-track {
-            background: #f1f1f1 !important;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #ff4b4b !important;
-            border-radius: 7px !important;
-            border: 2px solid #f1f1f1 !important;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #d83a3a !important;
-        }
+        ::-webkit-scrollbar { width: 14px !important; height: 14px !important; }
+        ::-webkit-scrollbar-track { background: #f1f1f1 !important; }
+        ::-webkit-scrollbar-thumb { background: #ff4b4b !important; border-radius: 7px !important; border: 2px solid #f1f1f1 !important; }
+        ::-webkit-scrollbar-thumb:hover { background: #d83a3a !important; }
 
-        /* 畫廊容器變成 2 欄 Grid */
         div[data-testid="stVerticalBlock"]:has(> div[data-testid="element-container"] .gallery-marker) {
             display: grid !important;
             grid-template-columns: repeat(2, 1fr) !important;
             gap: 0.5rem !important;
         }
         
-        /* 消除電腦版的橫向列包裝 */
         div[data-testid="stVerticalBlock"]:has(> div[data-testid="element-container"] .gallery-marker) > div[data-testid="stHorizontalBlock"] {
             display: contents !important;
         }
         
-        /* 強制卡片欄位填滿網格 */
         div[data-testid="stVerticalBlock"]:has(> div[data-testid="element-container"] .gallery-marker) div[data-testid="column"] {
             width: 100% !important;
             min-width: 0 !important;
             flex: none !important;
         }
         
-        /* 微調手機版按鈕內距避免擠壓 */
         div[data-testid="stVerticalBlock"]:has(> div[data-testid="element-container"] .gallery-marker) .stButton button {
             padding: 0.1rem !important;
         }
 
-        /* 手機端懸浮鈕微調 */
-        .back-to-top {
-            top: 80px;
-            right: 15px;
-            width: 45px;
-            height: 45px;
-            line-height: 45px;
-            font-size: 20px;
-        }
+        .back-to-top { top: 80px; right: 15px; width: 45px; height: 45px; line-height: 45px; font-size: 20px; }
     }
     </style>
 
-    <!-- 頂部錨點與 HTML 懸浮按鈕腳本 -->
     <div id="top-anchor"></div>
     <a href="#top-anchor" class="back-to-top" title="回到頂部">⬆️</a>
     """,
@@ -127,6 +100,13 @@ inject_custom_css()
 
 
 # --- 3. 核心功能函數 ---
+def get_thumbnail_url(url, width=400):
+    """利用 Cloudinary 動態轉換取得輕量縮圖，加速畫廊載入」"""
+    if "/upload/" in url:
+        return url.replace(
+            "/upload/", f"/upload/w_{width},c_scale,q_auto,f_auto/"
+        )
+    return url
 
 
 def format_file_size(size_in_bytes):
@@ -258,12 +238,12 @@ def show_large_image(photo):
         else:
             st.write("🏷️ **標籤**: (無)")
 
-    st.download_button(
-        label="⬇️ 下載圖檔",
-        data=requests.get(photo["url"]).content,
-        file_name=photo["name"],
-        mime="image/jpeg",
-        use_container_width=True,
+    # 採用非阻塞的開啟/下載原圖方式
+    st.markdown(
+        f'<a href="{photo["url"]}" target="_blank" download="{photo["name"]}">'
+        f'<button style="width:100%; padding:8px; background-color:#ff4b4b; color:white; border:none; border-radius:5px; cursor:pointer;">'
+        f"⬇️ 開啟 / 下載高畫質原圖</button></a>",
+        unsafe_allow_html=True,
     )
 
 
@@ -272,13 +252,67 @@ if "gallery" not in st.session_state:
     with st.spinner("載入資料庫..."):
         st.session_state.gallery = load_db()
 
+# =========================================================
+# 🔗 [新增功能] 檢查網址是否有分享參數 (?share=id1,id2)
+# =========================================================
+query_params = st.query_params
+
+if "share" in query_params:
+    st.title("🖼️ 專屬分享相簿")
+    st.caption("您正透過專屬分享連結瀏覽特定相片內容")
+
+    # 拆解 URL 中的 public_id 清單
+    raw_share = query_params["share"]
+    shared_ids = [pid.strip() for pid in raw_share.split(",") if pid.strip()]
+
+    # 從全域資料庫中過濾出這些被選取的照片
+    shared_photos = [
+        p for p in st.session_state.gallery if p["public_id"] in shared_ids
+    ]
+
+    if not shared_photos:
+        st.error("⚠️ 找不到分享的照片，連結可能已失效或圖片已被刪除。")
+    else:
+        st.success(f"📷 共有 {len(shared_photos)} 張分享的照片")
+        st.divider()
+
+        # 展示分享圖片 (網格排版)
+        for i in range(0, len(shared_photos), 3):
+            cols = st.columns(3)
+            for j in range(3):
+                if i + j < len(shared_photos):
+                    photo = shared_photos[i + j]
+                    with cols[j]:
+                        with st.container(border=True):
+                            # 使用 Cloudinary 縮圖載入加速
+                            st.image(
+                                get_thumbnail_url(photo["url"]),
+                                use_container_width=True,
+                            )
+                            st.caption(f"📄 {photo['name']}")
+
+                            if st.button(
+                                "🔍 查看大圖",
+                                key=f"share_zoom_{photo['public_id']}",
+                                use_container_width=True,
+                            ):
+                                show_large_image(photo)
+
+    # 分享模式下停止往下渲染完整的管理後台
+    st.stop()
+
+# =========================================================
+# 🏠 以下為正常完整版圖庫 (管理員/擁有者視角)
+# =========================================================
+st.title("☁️ 雲端圖庫 (電腦/手機 雙重適應版)")
+
 existing_albums = sorted(
     list(set([item["album"] for item in st.session_state.gallery]))
 )
 if "未分類" not in existing_albums:
     existing_albums.append("未分類")
 
-# --- 全域統一標籤列表 ---
+# 全域標籤列表
 DEFAULT_TAGS = [
     "彩色",
     "線稿",
@@ -347,7 +381,9 @@ with st.sidebar:
                     final_files = uploaded_files
 
                 if not final_files:
-                    st.info("💡 所有檔案皆已存在圖庫中，無新檔案需要上傳。")
+                    st.info(
+                        "💡 所有檔案皆已存在圖庫中，無新檔案需要上傳。"
+                    )
                 else:
                     progress = st.progress(0)
                     status_text = st.empty()
@@ -358,7 +394,9 @@ with st.sidebar:
                         )
                         try:
                             compressed_file = compress_image(f)
-                            file_size_bytes = compressed_file.getbuffer().nbytes
+                            file_size_bytes = (
+                                compressed_file.getbuffer().nbytes
+                            )
                             res = cloudinary.uploader.upload(compressed_file)
 
                             try:
@@ -429,7 +467,9 @@ if page_mode == "📸 相簿瀏覽":
             )
         with f_c5:
             all_years = sorted(
-                list(set([p["date"].year for p in st.session_state.gallery])),
+                list(
+                    set([p["date"].year for p in st.session_state.gallery])
+                ),
                 reverse=True,
             )
             filter_year = st.selectbox("📅 年份", ["全部"] + all_years)
@@ -491,7 +531,7 @@ if page_mode == "📸 相簿瀏覽":
 
     st.divider()
 
-    # --- 照片展示區：原生列排版 ---
+    # --- 照片展示區 ---
     selected_photos = []
     if filtered_photos:
         with st.container():
@@ -509,7 +549,11 @@ if page_mode == "📸 相簿瀏覽":
 
                         with cols[j]:
                             with st.container(border=True):
-                                st.image(photo["url"], use_container_width=True)
+                                # 使用 Cloudinary 動態縮圖載入畫廊
+                                st.image(
+                                    get_thumbnail_url(photo["url"]),
+                                    use_container_width=True,
+                                )
 
                                 btn_col, check_col = st.columns([1, 4])
                                 with btn_col:
@@ -532,12 +576,15 @@ if page_mode == "📸 相簿瀏覽":
                                     if photo["tags"]
                                     else "❌ 未分類"
                                 )
-                                size_str = format_file_size(photo.get("size", 0))
+                                size_str = format_file_size(
+                                    photo.get("size", 0)
+                                )
                                 st.caption(f"{tags_str} | 📏 {size_str}")
 
                                 if is_selected:
                                     selected_photos.append(photo)
 
+    # --- 批次操作控制面板 ---
     if selected_photos:
         st.write("")
         with st.container(border=True):
@@ -545,6 +592,31 @@ if page_mode == "📸 相簿瀏覽":
                 f"⚡ 已選取 {len(selected_photos)} 張照片，請進行下方批次操作："
             )
 
+            # =========================================================
+            # 🔗 [新增功能] 產生選取圖片的專屬分享連結
+            # =========================================================
+            st.subheader("🔗 產生專屬分享連結")
+            selected_pids = [p["public_id"] for p in selected_photos]
+            pids_query = ",".join(selected_pids)
+
+            # 產生帶有 query parameter 的網址
+            # (Streamlit 可以自動抓取目前部署的 URL 或使用相對路徑)
+            share_url = f"?share={urllib.parse.quote(pids_query)}"
+
+            st.text_input(
+                "複製下方連結分享給他人（訪客僅能看到選取的照片）：",
+                value=share_url,
+                help="將網址後方的 ?share=... 複製並貼在您的網站網址後面發給別人即可",
+            )
+            st.caption(
+                "💡 **說明**：使用者打開該連結後，系統會鎖定只展示這 "
+                + str(len(selected_photos))
+                + " 張圖片，其他圖片與後台功能皆會隱藏。"
+            )
+
+            st.divider()
+
+            # --- 標籤與刪除操作 ---
             act_c1, act_c2 = st.columns(2)
             with act_c1:
                 action_tags = st.multiselect("設定標籤操作", ALL_TAG_OPTIONS)
@@ -559,8 +631,9 @@ if page_mode == "📸 相簿瀏覽":
                                     set(current_tags + action_tags)
                                 )
                     save_db(st.session_state.gallery)
+                    clear_all_selections()
                     st.toast("✅ 標籤已加入！")
-                    time.sleep(1)
+                    time.sleep(0.5)
                     st.rerun()
 
                 if btn_col2.button("🔄 完全覆蓋", use_container_width=True):
@@ -569,8 +642,9 @@ if page_mode == "📸 相簿瀏覽":
                             if origin["public_id"] == p["public_id"]:
                                 origin["tags"] = action_tags
                     save_db(st.session_state.gallery)
+                    clear_all_selections()
                     st.toast("🔄 標籤已覆蓋！")
-                    time.sleep(1)
+                    time.sleep(0.5)
                     st.rerun()
 
             with act_c2:
@@ -590,8 +664,9 @@ if page_mode == "📸 相簿瀏覽":
                     ]
 
                     save_db(st.session_state.gallery)
+                    clear_all_selections()
                     st.success("已刪除！")
-                    time.sleep(1)
+                    time.sleep(0.5)
                     st.rerun()
 
             st.divider()
@@ -670,4 +745,6 @@ else:
                     table_df.index.name = "月份"
                     st.dataframe(table_df, use_container_width=True)
                 else:
-                    st.info("💡 請至少選擇一個年份以顯示圖表與數據表。")
+                    st.info(
+                        "💡 請至少選擇一個年份以顯示圖表與數據表。"
+                    )
