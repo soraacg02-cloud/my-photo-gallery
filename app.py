@@ -586,7 +586,7 @@ if page_mode == "📸 相簿瀏覽":
             )
 
             # =========================================================
-            # 🔗 [一鍵複製完整分享連結]
+            # 🔗 [修復版] 穿透 iframe 取得真實網址與一鍵複製
             # =========================================================
             st.subheader("🔗 產生專屬分享連結")
             selected_pids = [p["public_id"] for p in selected_photos]
@@ -594,23 +594,43 @@ if page_mode == "📸 相簿瀏覽":
 
             copy_code = f"""
             <div style="margin-bottom: 10px;">
-                <input type="text" id="shareUrlInput" style="width: 100%; padding: 10px; border: 1px solid #444; border-radius: 5px; background-color: #1e1e1e; color: #00ffcc; margin-bottom: 8px; font-size: 14px;" readonly>
-                <button onclick="copyShareUrl()" style="width: 100%; padding: 10px; background-color: #ff4b4b; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 15px;">
+                <input type="text" id="shareUrlInput" style="width: 100%; padding: 10px; border: 1px solid #444; border-radius: 5px; background-color: #1e1e1e; color: #00ffcc; margin-bottom: 8px; font-size: 14px; box-sizing: border-box;" readonly>
+                <button id="copyBtn" onclick="copyShareUrl()" style="width: 100%; padding: 10px; background-color: #ff4b4b; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 15px;">
                     📋 一鍵複製完整分享連結
                 </button>
             </div>
 
             <script>
-                const currentBaseUrl = window.location.origin + window.location.pathname;
-                const fullShareUrl = currentBaseUrl + "?share={pids_query}";
+                // 穿透 iframe 取得最外層父視窗 (瀏覽器網址列) 的真實 Domain
+                let parentOrigin = "";
+                let parentPath = "";
+                try {{
+                    parentOrigin = window.parent.location.origin;
+                    parentPath = window.parent.location.pathname;
+                }} catch (e) {{
+                    parentOrigin = window.location.origin;
+                    parentPath = window.location.pathname;
+                }}
+
+                const fullShareUrl = parentOrigin + parentPath + "?share={pids_query}";
                 
                 const inputEl = document.getElementById("shareUrlInput");
                 inputEl.value = fullShareUrl;
 
                 function copyShareUrl() {{
-                    if (navigator.clipboard && window.isSecureContext) {{
-                        navigator.clipboard.writeText(fullShareUrl).then(() => {{
-                            alert("✅ 完整分享連結已複製到剪貼簿！");
+                    const btn = document.getElementById("copyBtn");
+                    const targetClipboard = (window.parent && window.parent.navigator && window.parent.navigator.clipboard) 
+                                            ? window.parent.navigator.clipboard 
+                                            : navigator.clipboard;
+
+                    if (targetClipboard && window.isSecureContext) {{
+                        targetClipboard.writeText(fullShareUrl).then(() => {{
+                            btn.innerText = "✅ 已成功複製到剪貼簿！";
+                            btn.style.backgroundColor = "#28a745";
+                            setTimeout(() => {{
+                                btn.innerText = "📋 一鍵複製完整分享連結";
+                                btn.style.backgroundColor = "#ff4b4b";
+                            }}, 2500);
                         }}).catch(err => {{
                             fallbackCopy();
                         }});
@@ -620,9 +640,15 @@ if page_mode == "📸 相簿瀏覽":
                 }}
 
                 function fallbackCopy() {{
+                    const btn = document.getElementById("copyBtn");
                     inputEl.select();
                     document.execCommand('copy');
-                    alert("✅ 完整分享連結已複製到剪貼簿！");
+                    btn.innerText = "✅ 已成功複製到剪貼簿！";
+                    btn.style.backgroundColor = "#28a745";
+                    setTimeout(() => {{
+                        btn.innerText = "📋 一鍵複製完整分享連結";
+                        btn.style.backgroundColor = "#ff4b4b";
+                    }}, 2500);
                 }}
             </script>
             """
