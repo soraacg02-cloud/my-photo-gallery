@@ -10,6 +10,7 @@ import pandas as pd
 from PIL import ExifTags, Image
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 # --- 網頁配置 ---
 st.set_page_config(page_title="雲端圖庫 Ultimate", layout="wide")
@@ -101,7 +102,7 @@ inject_custom_css()
 
 # --- 3. 核心功能函數 ---
 def get_thumbnail_url(url, width=400):
-    """利用 Cloudinary 動態轉換取得輕量縮圖，加速畫廊載入」"""
+    """利用 Cloudinary 動態轉換取得輕量縮圖"""
     if "/upload/" in url:
         return url.replace(
             "/upload/", f"/upload/w_{width},c_scale,q_auto,f_auto/"
@@ -238,10 +239,9 @@ def show_large_image(photo):
         else:
             st.write("🏷️ **標籤**: (無)")
 
-    # 採用非阻塞的開啟/下載原圖方式
     st.markdown(
         f'<a href="{photo["url"]}" target="_blank" download="{photo["name"]}">'
-        f'<button style="width:100%; padding:8px; background-color:#ff4b4b; color:white; border:none; border-radius:5px; cursor:pointer;">'
+        f'<button style="width:100%; padding:10px; background-color:#ff4b4b; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">'
         f"⬇️ 開啟 / 下載高畫質原圖</button></a>",
         unsafe_allow_html=True,
     )
@@ -253,7 +253,7 @@ if "gallery" not in st.session_state:
         st.session_state.gallery = load_db()
 
 # =========================================================
-# 🔗 [新增功能] 檢查網址是否有分享參數 (?share=id1,id2)
+# 🔗 [分享存取頁面] 當網址含 ?share=id1,id2 時啟動
 # =========================================================
 query_params = st.query_params
 
@@ -261,11 +261,9 @@ if "share" in query_params:
     st.title("🖼️ 專屬分享相簿")
     st.caption("您正透過專屬分享連結瀏覽特定相片內容")
 
-    # 拆解 URL 中的 public_id 清單
     raw_share = query_params["share"]
     shared_ids = [pid.strip() for pid in raw_share.split(",") if pid.strip()]
 
-    # 從全域資料庫中過濾出這些被選取的照片
     shared_photos = [
         p for p in st.session_state.gallery if p["public_id"] in shared_ids
     ]
@@ -276,7 +274,6 @@ if "share" in query_params:
         st.success(f"📷 共有 {len(shared_photos)} 張分享的照片")
         st.divider()
 
-        # 展示分享圖片 (網格排版)
         for i in range(0, len(shared_photos), 3):
             cols = st.columns(3)
             for j in range(3):
@@ -284,7 +281,6 @@ if "share" in query_params:
                     photo = shared_photos[i + j]
                     with cols[j]:
                         with st.container(border=True):
-                            # 使用 Cloudinary 縮圖載入加速
                             st.image(
                                 get_thumbnail_url(photo["url"]),
                                 use_container_width=True,
@@ -298,11 +294,10 @@ if "share" in query_params:
                             ):
                                 show_large_image(photo)
 
-    # 分享模式下停止往下渲染完整的管理後台
     st.stop()
 
 # =========================================================
-# 🏠 以下為正常完整版圖庫 (管理員/擁有者視角)
+# 🏠 完整圖庫後台模式
 # =========================================================
 st.title("☁️ 雲端圖庫 (電腦/手機 雙重適應版)")
 
@@ -312,7 +307,6 @@ existing_albums = sorted(
 if "未分類" not in existing_albums:
     existing_albums.append("未分類")
 
-# 全域標籤列表
 DEFAULT_TAGS = [
     "彩色",
     "線稿",
@@ -549,7 +543,6 @@ if page_mode == "📸 相簿瀏覽":
 
                         with cols[j]:
                             with st.container(border=True):
-                                # 使用 Cloudinary 動態縮圖載入畫廊
                                 st.image(
                                     get_thumbnail_url(photo["url"]),
                                     use_container_width=True,
@@ -593,25 +586,53 @@ if page_mode == "📸 相簿瀏覽":
             )
 
             # =========================================================
-            # 🔗 [新增功能] 產生選取圖片的專屬分享連結
+            # 🔗 [一鍵複製完整分享連結]
             # =========================================================
             st.subheader("🔗 產生專屬分享連結")
             selected_pids = [p["public_id"] for p in selected_photos]
             pids_query = ",".join(selected_pids)
 
-            # 產生帶有 query parameter 的網址
-            # (Streamlit 可以自動抓取目前部署的 URL 或使用相對路徑)
-            share_url = f"?share={urllib.parse.quote(pids_query)}"
+            copy_code = f"""
+            <div style="margin-bottom: 10px;">
+                <input type="text" id="shareUrlInput" style="width: 100%; padding: 10px; border: 1px solid #444; border-radius: 5px; background-color: #1e1e1e; color: #00ffcc; margin-bottom: 8px; font-size: 14px;" readonly>
+                <button onclick="copyShareUrl()" style="width: 100%; padding: 10px; background-color: #ff4b4b; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 15px;">
+                    📋 一鍵複製完整分享連結
+                </button>
+            </div>
 
-            st.text_input(
-                "複製下方連結分享給他人（訪客僅能看到選取的照片）：",
-                value=share_url,
-                help="將網址後方的 ?share=... 複製並貼在您的網站網址後面發給別人即可",
-            )
+            <script>
+                const currentBaseUrl = window.location.origin + window.location.pathname;
+                const fullShareUrl = currentBaseUrl + "?share={pids_query}";
+                
+                const inputEl = document.getElementById("shareUrlInput");
+                inputEl.value = fullShareUrl;
+
+                function copyShareUrl() {{
+                    if (navigator.clipboard && window.isSecureContext) {{
+                        navigator.clipboard.writeText(fullShareUrl).then(() => {{
+                            alert("✅ 完整分享連結已複製到剪貼簿！");
+                        }}).catch(err => {{
+                            fallbackCopy();
+                        }});
+                    }} else {{
+                        fallbackCopy();
+                    }}
+                }}
+
+                function fallbackCopy() {{
+                    inputEl.select();
+                    document.execCommand('copy');
+                    alert("✅ 完整分享連結已複製到剪貼簿！");
+                }}
+            </script>
+            """
+
+            components.html(copy_code, height=105)
+
             st.caption(
-                "💡 **說明**：使用者打開該連結後，系統會鎖定只展示這 "
+                "💡 **說明**：點擊「一鍵複製完整分享連結」發給其他人，對方打開後將只能看到這 "
                 + str(len(selected_photos))
-                + " 張圖片，其他圖片與後台功能皆會隱藏。"
+                + " 張作品。"
             )
 
             st.divider()
