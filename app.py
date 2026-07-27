@@ -102,7 +102,6 @@ inject_custom_css()
 
 # --- 3. 核心功能函數 ---
 def get_thumbnail_url(url, width=400):
-    """利用 Cloudinary 動態轉換取得輕量縮圖"""
     if "/upload/" in url:
         return url.replace(
             "/upload/", f"/upload/w_{width},c_scale,q_auto,f_auto/"
@@ -212,11 +211,23 @@ def delete_image_from_cloud(public_id):
     cloudinary.uploader.destroy(public_id)
 
 
-def clear_all_selections():
+def request_clear_selections():
+    """設定清除選取標記，會在下一次渲染前安全清除"""
+    st.session_state["need_clear_selections"] = True
+
+
+# --- 4. 應用程式主邏輯 ---
+
+# 可以在元件繪製前安全清理狀態
+if st.session_state.get("need_clear_selections", False):
     for key in list(st.session_state.keys()):
         if key.startswith("sel_"):
             st.session_state[key] = False
+    st.session_state["need_clear_selections"] = False
 
+if "gallery" not in st.session_state:
+    with st.spinner("載入資料庫..."):
+        st.session_state.gallery = load_db()
 
 @st.dialog("📸 照片詳情", width="large")
 def show_large_image(photo):
@@ -246,14 +257,8 @@ def show_large_image(photo):
         unsafe_allow_html=True,
     )
 
-
-# --- 4. 應用程式主邏輯 ---
-if "gallery" not in st.session_state:
-    with st.spinner("載入資料庫..."):
-        st.session_state.gallery = load_db()
-
 # =========================================================
-# 🔗 [分享存取頁面] 當網址含 ?share=id1,id2 時啟動
+# 🔗 [分享存取頁面]
 # =========================================================
 query_params = st.query_params
 
@@ -467,17 +472,25 @@ if page_mode == "📸 相簿瀏覽":
                 reverse=True,
             )
             filter_year = st.selectbox("📅 年份", ["全部"] + all_years)
+
         with f_c6:
             all_months = list(range(1, 13))
-            filter_month = st.selectbox("🌙 月份", ["全部"] + all_months)
+            filter_months = st.multiselect(
+                "🌙 月份 (未選擇則代表全部)",
+                options=all_months,
+                default=all_months,
+                help="可勾選單一個月、複選多個月分，全不選則預設看全部",
+            )
 
     filtered_photos = []
     for p in st.session_state.gallery:
         match_album = (filter_album == "全部") or (p["album"] == filter_album)
         match_year = (filter_year == "全部") or (p["date"].year == filter_year)
-        match_month = (filter_month == "全部") or (
-            p["date"].month == filter_month
-        )
+
+        if not filter_months:
+            match_month = True
+        else:
+            match_month = p["date"].month in filter_months
 
         if show_untagged:
             match_tags = len(p["tags"]) == 0
@@ -585,9 +598,7 @@ if page_mode == "📸 相簿瀏覽":
                 f"⚡ 已選取 {len(selected_photos)} 張照片，請進行下方批次操作："
             )
 
-            # =========================================================
-            # 🔗 [修復版] 穿透 iframe 取得真實網址與一鍵複製
-            # =========================================================
+            # --- 分享連結 ---
             st.subheader("🔗 產生專屬分享連結")
             selected_pids = [p["public_id"] for p in selected_photos]
             pids_query = ",".join(selected_pids)
@@ -601,7 +612,6 @@ if page_mode == "📸 相簿瀏覽":
             </div>
 
             <script>
-                // 穿透 iframe 取得最外層父視窗 (瀏覽器網址列) 的真實 Domain
                 let parentOrigin = "";
                 let parentPath = "";
                 try {{
@@ -678,7 +688,7 @@ if page_mode == "📸 相簿瀏覽":
                                     set(current_tags + action_tags)
                                 )
                     save_db(st.session_state.gallery)
-                    clear_all_selections()
+                    request_clear_selections()
                     st.toast("✅ 標籤已加入！")
                     time.sleep(0.5)
                     st.rerun()
@@ -689,7 +699,7 @@ if page_mode == "📸 相簿瀏覽":
                             if origin["public_id"] == p["public_id"]:
                                 origin["tags"] = action_tags
                     save_db(st.session_state.gallery)
-                    clear_all_selections()
+                    request_clear_selections()
                     st.toast("🔄 標籤已覆蓋！")
                     time.sleep(0.5)
                     st.rerun()
@@ -711,7 +721,7 @@ if page_mode == "📸 相簿瀏覽":
                     ]
 
                     save_db(st.session_state.gallery)
-                    clear_all_selections()
+                    request_clear_selections()
                     st.success("已刪除！")
                     time.sleep(0.5)
                     st.rerun()
@@ -720,7 +730,7 @@ if page_mode == "📸 相簿瀏覽":
             st.button(
                 "❎ 取消所有選取 (離開編輯模式)",
                 use_container_width=True,
-                on_click=clear_all_selections,
+                on_click=request_clear_selections,
             )
 
 else:
