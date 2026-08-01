@@ -27,7 +27,7 @@ if "cloudinary" in st.secrets:
 DB_FILENAME = "photo_db_v2.json"
 
 
-# --- 2. 專屬 CSS 魔法 (含第二張圖風格的滿版菱形浮水印) ---
+# --- 2. 專屬 CSS 魔法 (優化版：寬鬆輕盈的滿版菱形防護網) ---
 def inject_custom_css():
     st.markdown(
         """
@@ -61,7 +61,7 @@ def inject_custom_css():
         transform: scale(1.1);
     }
 
-    /* 菱形格紋浮水印圖層 (模仿 CLIP STUDIO 滿版防護網) */
+    /* 菱形格紋浮水印圖層 (輕量透氣防護網) */
     .watermark-container {
         position: relative;
         width: 100%;
@@ -82,12 +82,12 @@ def inject_custom_css():
         height: 100%;
         pointer-events: all; /* 攔截滑鼠右鍵點擊照片 */
         background-color: transparent;
-        /* 畫出菱形滿版交叉線條 + 圓點風格 */
+        /* 拉大網格間距 (140px)，縮小點點 (2px) 並調薄透明度 (0.15) */
         background-image: 
-            repeating-linear-gradient(45deg, rgba(0,0,0,0.25) 0, rgba(0,0,0,0.25) 1.5px, transparent 0, transparent 40px),
-            repeating-linear-gradient(-45deg, rgba(0,0,0,0.25) 0, rgba(0,0,0,0.25) 1.5px, transparent 0, transparent 40px),
-            radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0.4) 3px, transparent 4px);
-        background-size: 56px 56px, 56px 56px, 28px 28px;
+            repeating-linear-gradient(45deg, rgba(0,0,0,0.15) 0, rgba(0,0,0,0.15) 1px, transparent 0, transparent 100px),
+            repeating-linear-gradient(-45deg, rgba(0,0,0,0.15) 0, rgba(0,0,0,0.15) 1px, transparent 0, transparent 100px),
+            radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0.25) 2px, transparent 3px);
+        background-size: 140px 140px, 140px 140px, 70px 70px;
         background-position: 0 0, 0 0, 0 0;
     }
 
@@ -393,7 +393,7 @@ if "share" in query_params:
                     photo = shared_photos[i + j]
                     with cols[j]:
                         with st.container(border=True):
-                            # 呼叫渲染函式帶入菱形浮水印圖層
+                            # 呼叫渲染函式帶入輕量菱形浮水印圖層
                             render_watermarked_image(
                                 get_thumbnail_url(photo["url"], width=800), 
                                 watermark=use_watermark
@@ -725,10 +725,10 @@ if page_mode == "📸 相簿瀏覽":
                 f"⚡ 已選取 {len(selected_photos)} 張照片，請進行下方批次操作："
             )
 
-            # --- 分享連結（含菱形浮水印開關） ---
+            # --- 分享連結（含浮水印開關） ---
             st.subheader("🔗 產生專屬分享連結")
             
-            enable_wm = st.checkbox("🔒 加上菱形 SAMPLE 防護浮水印（勾選後對方將看到全圖網格保護線）", value=True)
+            enable_wm = st.checkbox("🔒 加上菱形 SAMPLE 防護浮水印（勾選後對方將看到輕透滿版保護線）", value=True)
             
             selected_pids = [p["public_id"] for p in selected_photos]
             pids_query = ",".join(selected_pids)
