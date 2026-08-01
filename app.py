@@ -13,7 +13,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 # --- 網頁配置 ---
-st.set_page_config(page_title="雲端圖庫 Ultimate", layout="wide")
+st.set_page_config(page_title="雲端圖庫 Ultimate", layout="wide", page_icon="🖼️")
 
 # --- 1. Cloudinary 連線設定 ---
 if "cloudinary" in st.secrets:
@@ -63,10 +63,9 @@ def inject_custom_css():
 
     /* 手機版專屬排版 (小於 640px) */
     @media (max-width: 640px) {
-        ::-webkit-scrollbar { width: 14px !important; height: 14px !important; }
+        ::-webkit-scrollbar { width: 10px !important; height: 10px !important; }
         ::-webkit-scrollbar-track { background: #f1f1f1 !important; }
-        ::-webkit-scrollbar-thumb { background: #ff4b4b !important; border-radius: 7px !important; border: 2px solid #f1f1f1 !important; }
-        ::-webkit-scrollbar-thumb:hover { background: #d83a3a !important; }
+        ::-webkit-scrollbar-thumb { background: #ff4b4b !important; border-radius: 5px !important; }
 
         div[data-testid="stVerticalBlock"]:has(> div[data-testid="element-container"] .gallery-marker) {
             display: grid !important;
@@ -85,12 +84,13 @@ def inject_custom_css():
         }
         
         div[data-testid="stVerticalBlock"]:has(> div[data-testid="element-container"] .gallery-marker) .stButton button {
-            padding: 0.1rem !important;
+            padding: 0.2rem !important;
+            font-size: 14px !important;
         }
 
-        .float-btn { width: 45px; height: 45px; line-height: 45px; font-size: 18px; right: 15px; }
-        .back-to-top { top: 80px; }
-        .go-to-bottom { top: 135px; }
+        .float-btn { width: 42px; height: 42px; line-height: 42px; font-size: 16px; right: 12px; }
+        .back-to-top { top: 75px; }
+        .go-to-bottom { top: 125px; }
     }
     </style>
 
@@ -171,8 +171,8 @@ def load_db():
         url, options = cloudinary.utils.cloudinary_url(
             DB_FILENAME, resource_type="raw"
         )
-        no_cache_url = f"{url}?t={time.time()}"
-        response = requests.get(no_cache_url)
+        no_cache_url = f"{url}?t={int(time.time())}"
+        response = requests.get(no_cache_url, timeout=10)
         if response.status_code == 200:
             data = response.json()
             for item in data:
@@ -204,18 +204,24 @@ def save_db(data):
                 "size": item.get("size", 0),
             }
         )
-    json_str = json.dumps(save_list, ensure_ascii=False, indent=4)
-    cloudinary.uploader.upload(
-        BytesIO(json_str.encode("utf-8")),
-        public_id=DB_FILENAME,
-        resource_type="raw",
-        overwrite=True,
-        invalidate=True,
-    )
+    json_str = json.dumps(save_list, ensure_ascii=False, indent=2)
+    try:
+        cloudinary.uploader.upload(
+            BytesIO(json_str.encode("utf-8")),
+            public_id=DB_FILENAME,
+            resource_type="raw",
+            overwrite=True,
+            invalidate=True,
+        )
+    except Exception as e:
+        st.error(f"資料庫同步雲端失敗: {e}")
 
 
 def delete_image_from_cloud(public_id):
-    cloudinary.uploader.destroy(public_id)
+    try:
+        cloudinary.uploader.destroy(public_id)
+    except Exception as e:
+        print(f"刪除圖片失敗 ({public_id}): {e}")
 
 
 def request_clear_selections():
@@ -231,20 +237,20 @@ if st.session_state.get("need_clear_selections", False):
     st.session_state["need_clear_selections"] = False
 
 if "gallery" not in st.session_state:
-    with st.spinner("載入資料庫..."):
+    with st.spinner("載入雲端資料庫..."):
         st.session_state.gallery = load_db()
 
 
-# === 📸 照片詳情 Modal (含新增：修改檔名功能) ===
+# === 📸 照片詳情 Modal (含修改檔名與獨立修改標籤功能) ===
 @st.dialog("📸 照片詳情", width="large")
 def show_large_image(photo):
     st.image(photo["url"], use_container_width=True)
     st.divider()
 
-    # --- ✏️ 新增修改檔名功能 ---
+    # --- ✏️ 1. 修改檔名 ---
     st.subheader("✏️ 修改檔名")
-    new_name = st.text_input("檔名", value=photo["name"], key=f"edit_name_{photo['public_id']}")
-    if st.button("💾 儲存檔名", use_container_width=True):
+    new_name = st.text_input("檔名", value=photo["name"], key=f"edit_name_modal_{photo['public_id']}")
+    if st.button("💾 儲存檔名", key=f"btn_name_modal_{photo['public_id']}", use_container_width=True):
         if new_name.strip():
             for origin in st.session_state.gallery:
                 if origin["public_id"] == photo["public_id"]:
@@ -259,7 +265,27 @@ def show_large_image(photo):
 
     st.divider()
 
-    c1, c2, c3 = st.columns(3)
+    # --- 🏷️ 2. 修改獨立標籤 ---
+    st.subheader("🏷️ 修改標籤")
+    selected_tags_modal = st.multiselect(
+        "標籤內容",
+        options=ALL_TAG_OPTIONS,
+        default=[t for t in photo.get("tags", []) if t in ALL_TAG_OPTIONS],
+        key=f"edit_tags_modal_{photo['public_id']}"
+    )
+    if st.button("💾 儲存標籤", key=f"btn_tags_modal_{photo['public_id']}", use_container_width=True, type="primary"):
+        for origin in st.session_state.gallery:
+            if origin["public_id"] == photo["public_id"]:
+                origin["tags"] = selected_tags_modal
+                break
+        save_db(st.session_state.gallery)
+        st.toast("✅ 標籤已成功更新！")
+        time.sleep(0.5)
+        st.rerun()
+
+    st.divider()
+
+    c1, c2 = st.columns(2)
     with c1:
         st.write(f"📅 **日期**: {photo['date']}")
         st.write(f"📂 **相簿**: {photo['album']}")
@@ -267,15 +293,9 @@ def show_large_image(photo):
         file_size_str = format_file_size(photo.get("size", 0))
         st.write(f"📏 **大小**: {file_size_str}")
 
-    with c3:
-        if photo["tags"]:
-            st.write(f"🏷️ **標籤**: {', '.join(photo['tags'])}")
-        else:
-            st.write("🏷️ **標籤**: (無)")
-
     st.markdown(
         f'<a href="{photo["url"]}" target="_blank" download="{photo["name"]}">'
-        f'<button style="width:100%; padding:10px; background-color:#ff4b4b; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">'
+        f'<button style="width:100%; padding:10px; background-color:#ff4b4b; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; margin-top:10px;">'
         f"⬇️ 開啟 / 下載高畫質原圖</button></a>",
         unsafe_allow_html=True,
     )
@@ -290,11 +310,9 @@ if "share" in query_params:
     st.title("🖼️ 專屬分享相簿")
     st.caption("您正透過專屬分享連結瀏覽特定相片內容")
 
-    # 注入防下載/防右鍵/防拖曳 CSS 與 JS 魔法
     st.markdown(
         """
         <style>
-        /* 防拖曳與複製圖片 */
         img {
             pointer-events: none !important;
             -webkit-touch-callout: none !important;
@@ -303,7 +321,6 @@ if "share" in query_params:
         }
         </style>
         <script>
-        // 禁用右鍵選單
         document.addEventListener('contextmenu', event => event.preventDefault());
         </script>
         """,
@@ -323,7 +340,6 @@ if "share" in query_params:
         st.success(f"📷 共有 {len(shared_photos)} 張分享的作品")
         st.divider()
 
-        # 僅提供純縮圖展示，移除「🔍 查看大圖」彈窗與下載連結
         for i in range(0, len(shared_photos), 3):
             cols = st.columns(3)
             for j in range(3):
@@ -337,7 +353,6 @@ if "share" in query_params:
                             )
                             st.caption(f"📄 {photo['name']}")
 
-    # 頁尾錨點 (供懸浮按鈕跳轉)
     st.markdown('<div id="bottom-anchor"></div>', unsafe_allow_html=True)
     st.stop()
 
@@ -352,21 +367,30 @@ existing_albums = sorted(
 if "未分類" not in existing_albums:
     existing_albums.append("未分類")
 
-DEFAULT_TAGS = [
-    "彩色",
-    "線稿",
-    "單人",
-    "雙人",
+# === 預設標籤與指定排序設定 ===
+DING_TAGS = [
     "無償",
     "非無償",
-    "人物",
-    "風景",
-    "生物",
+    "雙人",
+    "單人",
+    "線稿",
+    "色彩",
+    "✅SAMPLE",
 ]
+
+RING_TAGS = [
+    "人物",
+    "生物",
+    "風景",
+]
+
+DEFAULT_TAGS = DING_TAGS + RING_TAGS
+
 db_existing_tags = [
     tag for item in st.session_state.gallery for tag in item["tags"]
 ]
-ALL_TAG_OPTIONS = sorted(list(set(DEFAULT_TAGS + db_existing_tags)))
+extra_tags = [tag for tag in db_existing_tags if tag not in DEFAULT_TAGS]
+ALL_TAG_OPTIONS = DEFAULT_TAGS + sorted(list(set(extra_tags)))
 
 # === 側邊欄 ===
 with st.sidebar:
@@ -387,7 +411,7 @@ with st.sidebar:
 
     uploaded_files = st.file_uploader(
         "選擇圖片 (可多選)",
-        type=["jpg", "png", "jpeg"],
+        type=["jpg", "png", "jpeg", "webp"],
         accept_multiple_files=True,
     )
 
@@ -398,9 +422,9 @@ with st.sidebar:
         ]
 
         if duplicates:
-            st.warning(f"⚠️ 發現重複的檔名：\n{', '.join(duplicates)}")
+            st.warning(f"⚠️ 發現重複檔名：\n{', '.join(duplicates)}")
             upload_mode = st.radio(
-                "遇到重複檔案的處理方式：",
+                "對重複檔案的操作：",
                 ["略過重複檔案 (建議)", "強制全部上傳"],
             )
         else:
@@ -420,16 +444,14 @@ with st.sidebar:
                     final_files = uploaded_files
 
                 if not final_files:
-                    st.info(
-                        "💡 所有檔案皆已存在圖庫中，無新檔案需要上傳。"
-                    )
+                    st.info("💡 所有檔案皆已存在圖庫中，無新檔案上傳。")
                 else:
                     progress = st.progress(0)
                     status_text = st.empty()
 
                     for i, f in enumerate(final_files):
                         status_text.text(
-                            f"處理中 {i+1}/{len(final_files)}：{f.name} (壓縮中...)"
+                            f"處理中 {i+1}/{len(final_files)}：{f.name} (壓縮上傳中...)"
                         )
                         try:
                             compressed_file = compress_image(f)
@@ -461,7 +483,7 @@ with st.sidebar:
 
                         progress.progress((i + 1) / len(final_files))
 
-                    status_text.text("儲存資料庫...")
+                    status_text.text("儲存更新資料庫...")
                     save_db(st.session_state.gallery)
                     st.success("上傳完成！")
                     time.sleep(1)
@@ -519,7 +541,6 @@ if page_mode == "📸 相簿瀏覽":
                 "🌙 月份 (未選擇則代表全部)",
                 options=all_months,
                 default=all_months,
-                help="可勾選單一個月、複選多個月分，全不選則預設看全部",
             )
 
     filtered_photos = []
@@ -606,7 +627,7 @@ if page_mode == "📸 相簿瀏覽":
                                     if st.button(
                                         "🔍",
                                         key=f"zoom_{photo['public_id']}",
-                                        help="查看大圖與修改檔名",
+                                        help="查看大圖、修改檔名與標籤",
                                     ):
                                         show_large_image(photo)
                                 with check_col:
@@ -626,6 +647,25 @@ if page_mode == "📸 相簿瀏覽":
                                     photo.get("size", 0)
                                 )
                                 st.caption(f"{tags_str} | 📏 {size_str}")
+
+                                # --- ✏️ 單張獨立修改標籤區塊 ---
+                                with st.expander("✏️ 單張修改標籤", expanded=False):
+                                    card_tags = st.multiselect(
+                                        "修改標籤",
+                                        options=ALL_TAG_OPTIONS,
+                                        default=[t for t in photo.get("tags", []) if t in ALL_TAG_OPTIONS],
+                                        key=f"card_tags_{photo['public_id']}",
+                                        label_visibility="collapsed"
+                                    )
+                                    if st.button("💾 儲存標籤", key=f"save_card_tags_{photo['public_id']}", use_container_width=True):
+                                        for origin in st.session_state.gallery:
+                                            if origin["public_id"] == photo["public_id"]:
+                                                origin["tags"] = card_tags
+                                                break
+                                        save_db(st.session_state.gallery)
+                                        st.toast(f"✅ {photo['name']} 標籤已更新！")
+                                        time.sleep(0.5)
+                                        st.rerun()
 
                                 if is_selected:
                                     selected_photos.append(photo)
