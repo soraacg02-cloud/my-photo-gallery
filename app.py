@@ -27,7 +27,7 @@ if "cloudinary" in st.secrets:
 DB_FILENAME = "photo_db_v2.json"
 
 
-# --- 2. 專屬 CSS 魔法 ---
+# --- 2. 專屬 CSS 魔法 (含第二張圖風格的滿版菱形浮水印) ---
 def inject_custom_css():
     st.markdown(
         """
@@ -59,6 +59,36 @@ def inject_custom_css():
     .float-btn:hover {
         background-color: #e03e3e;
         transform: scale(1.1);
+    }
+
+    /* 菱形格紋浮水印圖層 (模仿 CLIP STUDIO 滿版防護網) */
+    .watermark-container {
+        position: relative;
+        width: 100%;
+        display: inline-block;
+        overflow: hidden;
+        border-radius: 8px;
+    }
+    .watermark-container img {
+        width: 100%;
+        height: auto;
+        display: block;
+    }
+    .watermark-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: all; /* 攔截滑鼠右鍵點擊照片 */
+        background-color: transparent;
+        /* 畫出菱形滿版交叉線條 + 圓點風格 */
+        background-image: 
+            repeating-linear-gradient(45deg, rgba(0,0,0,0.25) 0, rgba(0,0,0,0.25) 1.5px, transparent 0, transparent 40px),
+            repeating-linear-gradient(-45deg, rgba(0,0,0,0.25) 0, rgba(0,0,0,0.25) 1.5px, transparent 0, transparent 40px),
+            radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0.4) 3px, transparent 4px);
+        background-size: 56px 56px, 56px 56px, 28px 28px;
+        background-position: 0 0, 0 0, 0 0;
     }
 
     /* 手機版專屬排版 (小於 640px) */
@@ -107,15 +137,25 @@ inject_custom_css()
 
 
 # --- 3. 核心功能函數 ---
-def get_thumbnail_url(url, width=600, watermark=False):
-    """利用 Cloudinary 動態轉換取得縮圖，可選擇性疊加 SAMPLE 浮水印"""
+def get_thumbnail_url(url, width=800):
+    """利用 Cloudinary 動態轉換取得輕量縮圖"""
     if "/upload/" in url:
-        trans = f"w_{width},c_scale,q_auto,f_auto"
-        if watermark:
-            # 疊加白色半透明 (o_35) 斜角 (-30度) SAMPLE 浮水印
-            trans += ",l_text:Arial_80_bold:SAMPLE,co_rgb:ffffff,o_35,a_-30"
-        return url.replace("/upload/", f"/upload/{trans}/")
+        return url.replace("/upload/", f"/upload/w_{width},c_scale,q_auto,f_auto/")
     return url
+
+
+def render_watermarked_image(image_url, watermark=False):
+    """根據是否開啟浮水印，渲染對應的 HTML 圖片結構"""
+    if watermark:
+        html_code = f"""
+        <div class="watermark-container">
+            <img src="{image_url}" style="width:100%; border-radius: 5px;">
+            <div class="watermark-overlay" title="SAMPLE WATERMARK"></div>
+        </div>
+        """
+        st.markdown(html_code, unsafe_allow_html=True)
+    else:
+        st.image(image_url, use_container_width=True)
 
 
 def format_file_size(size_in_bytes):
@@ -304,7 +344,7 @@ def show_large_image(photo):
 
 
 # =========================================================
-# 🔗 [分享頁面]（鎖定：不可放大、不可下載圖片、防右鍵、可含 SAMPLE 浮水印）
+# 🔗 [分享頁面]（鎖定：不可放大、不可下載圖片、防右鍵、菱形網格保護網）
 # =========================================================
 query_params = st.query_params
 
@@ -342,7 +382,7 @@ if "share" in query_params:
     if not shared_photos:
         st.error("⚠️ 找不到分享的照片，連結可能已失效或圖片已被刪除。")
     else:
-        wm_status = " (已保護：已載入 SAMPLE 浮水印)" if use_watermark else ""
+        wm_status = " (已保護：已載入菱形 SAMPLE 浮水印)" if use_watermark else ""
         st.success(f"📷 共有 {len(shared_photos)} 張分享的作品{wm_status}")
         st.divider()
 
@@ -353,9 +393,10 @@ if "share" in query_params:
                     photo = shared_photos[i + j]
                     with cols[j]:
                         with st.container(border=True):
-                            st.image(
-                                get_thumbnail_url(photo["url"], width=800, watermark=use_watermark),
-                                use_container_width=True,
+                            # 呼叫渲染函式帶入菱形浮水印圖層
+                            render_watermarked_image(
+                                get_thumbnail_url(photo["url"], width=800), 
+                                watermark=use_watermark
                             )
                             st.caption(f"📄 {photo['name']}")
 
@@ -684,11 +725,10 @@ if page_mode == "📸 相簿瀏覽":
                 f"⚡ 已選取 {len(selected_photos)} 張照片，請進行下方批次操作："
             )
 
-            # --- 分享連結（含浮水印開關） ---
+            # --- 分享連結（含菱形浮水印開關） ---
             st.subheader("🔗 產生專屬分享連結")
             
-            # 新增：浮水印勾選開關
-            enable_wm = st.checkbox("🔒 加上 SAMPLE 浮水印（勾選後對方看到的圖片將帶有半透明 SAMPLE 字樣）", value=True)
+            enable_wm = st.checkbox("🔒 加上菱形 SAMPLE 防護浮水印（勾選後對方將看到全圖網格保護線）", value=True)
             
             selected_pids = [p["public_id"] for p in selected_photos]
             pids_query = ",".join(selected_pids)
