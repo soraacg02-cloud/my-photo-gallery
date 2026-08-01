@@ -35,7 +35,7 @@ def inject_custom_css():
     /* 標籤美化 */
     span[data-baseweb="tag"] { background-color: #ff4b4b !important; border-radius: 15px !important; padding: 2px 10px !important;}
     
-    /* 1. 懸浮按鈕基礎樣式 (向上 / 向下) */
+    /* 懸浮按鈕基礎樣式 (向上 / 向下) */
     .float-btn {
         position: fixed;
         right: 25px;
@@ -107,12 +107,14 @@ inject_custom_css()
 
 
 # --- 3. 核心功能函數 ---
-def get_thumbnail_url(url, width=400):
-    """利用 Cloudinary 動態轉換取得輕量縮圖"""
+def get_thumbnail_url(url, width=600, watermark=False):
+    """利用 Cloudinary 動態轉換取得縮圖，可選擇性疊加 SAMPLE 浮水印"""
     if "/upload/" in url:
-        return url.replace(
-            "/upload/", f"/upload/w_{width},c_scale,q_auto,f_auto/"
-        )
+        trans = f"w_{width},c_scale,q_auto,f_auto"
+        if watermark:
+            # 疊加白色半透明 (o_35) 斜角 (-30度) SAMPLE 浮水印
+            trans += ",l_text:Arial_80_bold:SAMPLE,co_rgb:ffffff,o_35,a_-30"
+        return url.replace("/upload/", f"/upload/{trans}/")
     return url
 
 
@@ -241,7 +243,7 @@ if "gallery" not in st.session_state:
         st.session_state.gallery = load_db()
 
 
-# === 📸 照片詳情 Modal (含修改檔名與獨立修改標籤功能) ===
+# === 📸 照片詳情 Modal ===
 @st.dialog("📸 照片詳情", width="large")
 def show_large_image(photo):
     st.image(photo["url"], use_container_width=True)
@@ -302,7 +304,7 @@ def show_large_image(photo):
 
 
 # =========================================================
-# 🔗 [分享頁面]（鎖定：不可放大、不可下載圖片、防右鍵）
+# 🔗 [分享頁面]（鎖定：不可放大、不可下載圖片、防右鍵、可含 SAMPLE 浮水印）
 # =========================================================
 query_params = st.query_params
 
@@ -330,6 +332,9 @@ if "share" in query_params:
     raw_share = query_params["share"]
     shared_ids = [pid.strip() for pid in raw_share.split(",") if pid.strip()]
 
+    # 檢查網址是否有勾選啟用浮水印 (&wm=1)
+    use_watermark = query_params.get("wm", "0") == "1"
+
     shared_photos = [
         p for p in st.session_state.gallery if p["public_id"] in shared_ids
     ]
@@ -337,7 +342,8 @@ if "share" in query_params:
     if not shared_photos:
         st.error("⚠️ 找不到分享的照片，連結可能已失效或圖片已被刪除。")
     else:
-        st.success(f"📷 共有 {len(shared_photos)} 張分享的作品")
+        wm_status = " (已保護：已載入 SAMPLE 浮水印)" if use_watermark else ""
+        st.success(f"📷 共有 {len(shared_photos)} 張分享的作品{wm_status}")
         st.divider()
 
         for i in range(0, len(shared_photos), 3):
@@ -348,7 +354,7 @@ if "share" in query_params:
                     with cols[j]:
                         with st.container(border=True):
                             st.image(
-                                get_thumbnail_url(photo["url"]),
+                                get_thumbnail_url(photo["url"], width=800, watermark=use_watermark),
                                 use_container_width=True,
                             )
                             st.caption(f"📄 {photo['name']}")
@@ -678,10 +684,15 @@ if page_mode == "📸 相簿瀏覽":
                 f"⚡ 已選取 {len(selected_photos)} 張照片，請進行下方批次操作："
             )
 
-            # --- 分享連結 ---
+            # --- 分享連結（含浮水印開關） ---
             st.subheader("🔗 產生專屬分享連結")
+            
+            # 新增：浮水印勾選開關
+            enable_wm = st.checkbox("🔒 加上 SAMPLE 浮水印（勾選後對方看到的圖片將帶有半透明 SAMPLE 字樣）", value=True)
+            
             selected_pids = [p["public_id"] for p in selected_photos]
             pids_query = ",".join(selected_pids)
+            wm_param = "&wm=1" if enable_wm else "&wm=0"
 
             copy_code = f"""
             <div style="margin-bottom: 10px;">
@@ -702,7 +713,7 @@ if page_mode == "📸 相簿瀏覽":
                     parentPath = window.location.pathname;
                 }}
 
-                const fullShareUrl = parentOrigin + parentPath + "?share={pids_query}";
+                const fullShareUrl = parentOrigin + parentPath + "?share={pids_query}{wm_param}";
                 
                 const inputEl = document.getElementById("shareUrlInput");
                 inputEl.value = fullShareUrl;
